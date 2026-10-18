@@ -1,0 +1,150 @@
+from datetime import datetime, timezone
+
+from flask_login import UserMixin
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from .extensions import db, login_manager
+
+
+def utcnow():
+    return datetime.now(timezone.utc)
+
+
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    mobile = db.Column(db.String(40), nullable=False)
+    designation = db.Column(db.String(120), nullable=False, default="Engineer")
+    password_hash = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.String(20), nullable=False, default="employee")
+    created_date = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    auth_version = db.Column(
+        db.Integer, nullable=False, default=0, server_default=db.text("0")
+    )
+
+    assigned_sites = db.relationship(
+        "AssignedSite", back_populates="employee", cascade="all, delete-orphan"
+    )
+    attendance_records = db.relationship("Attendance", back_populates="employee")
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def get_id(self):
+        return f"{self.id}:{self.auth_version}"
+
+    @property
+    def is_admin(self):
+        return self.role == "admin"
+
+
+class AssignedSite(db.Model):
+    __tablename__ = "assigned_sites"
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    site_name = db.Column(db.String(160), nullable=False)
+    customer_name = db.Column(db.String(160), nullable=False)
+    address = db.Column(db.Text, nullable=False)
+    latitude = db.Column(db.Float, nullable=False)
+    longitude = db.Column(db.Float, nullable=False)
+    allowed_radius = db.Column(db.Float, nullable=False, default=100)
+    assigned_date = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+
+    employee = db.relationship("User", back_populates="assigned_sites")
+    attendance_records = db.relationship("Attendance", back_populates="site")
+
+
+class Attendance(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    site_id = db.Column(db.Integer, db.ForeignKey("assigned_sites.id"), nullable=False)
+    checkin_time = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    checkout_time = db.Column(db.DateTime(timezone=True))
+    checkin_lat = db.Column(db.Float, nullable=False)
+    checkin_lon = db.Column(db.Float, nullable=False)
+    checkout_lat = db.Column(db.Float)
+    checkout_lon = db.Column(db.Float)
+    checkin_selfie = db.Column(db.String(255), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="onsite")
+
+    employee = db.relationship("User", back_populates="attendance_records")
+    site = db.relationship("AssignedSite", back_populates="attendance_records")
+    report = db.relationship(
+        "SiteReport",
+        back_populates="attendance",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class SiteReport(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    attendance_id = db.Column(
+        db.Integer, db.ForeignKey("attendance.id"), nullable=False, unique=True
+    )
+    work_performed = db.Column(db.Text, nullable=False)
+    activities_completed = db.Column(db.Text, nullable=False)
+    issues_found = db.Column(db.Text, nullable=False)
+    recommendations = db.Column(db.Text, nullable=False)
+    materials_used = db.Column(db.Text, nullable=False)
+    remarks = db.Column(db.Text, nullable=False)
+    engineer_name = db.Column(db.String(120), nullable=False)
+    customer_representative_name = db.Column(db.String(120), nullable=False)
+    employee_signature = db.Column(db.String(255), nullable=False)
+    customer_signature = db.Column(db.String(255), nullable=False)
+    report_date = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    attendance = db.relationship("Attendance", back_populates="report")
+
+
+class AuditLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    action = db.Column(db.String(80), nullable=False)
+    details = db.Column(db.Text)
+    ip_address = db.Column(db.String(45))
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    user = db.relationship("User")
+
+
+class Invoice(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_number = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    site_id = db.Column(db.Integer, db.ForeignKey("assigned_sites.id"), nullable=False)
+    customer_name = db.Column(db.String(160), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    billable_days = db.Column(db.Integer, nullable=False)
+    daily_rate = db.Column(db.Numeric(12, 2), nullable=False)
+    total_amount = db.Column(db.Numeric(14, 2), nullable=False)
+    currency = db.Column(db.String(3), nullable=False, default="INR")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+
+    employee = db.relationship("User", foreign_keys=[employee_id])
+    site = db.relationship("AssignedSite")
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        raw_id, separator, raw_version = user_id.partition(":")
+        user = db.session.get(User, int(raw_id))
+        if user and (
+            (separator and int(raw_version) != user.auth_version)
+            or (not separator and user.auth_version != 0)
+        ):
+            return None
+        return user
+    except (TypeError, ValueError):
+        return None

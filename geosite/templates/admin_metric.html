@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">DASHBOARD DETAILS</p><h1>{{ title }}</h1><p class="text-secondary mb-0">{{ rows|length }} matching record{{ '' if rows|length == 1 else 's' }}.</p></div><a class="btn btn-outline-primary" href="{{ url_for('main.admin_dashboard') }}">Back to dashboard</a></div>
+<section class="panel-card"><div class="table-responsive"><table class="table align-middle">
+  <thead><tr>{% for heading in headings %}<th>{{ heading }}</th>{% endfor %}</tr></thead>
+  <tbody>{% for row in rows %}
+    <tr><td class="fw-semibold">{{ row.employee }}</td><td>{{ row.details }}</td><td>{{ row.status }}</td><td>{% if row.pdf_url %}<a class="btn btn-sm btn-outline-primary" href="{{ row.pdf_url }}">Download PDF</a>{% else %}—{% endif %}</td></tr>
+  {% else %}<tr><td colspan="{{ headings|length }}" class="empty-state">No matching records.</td></tr>{% endfor %}</tbody>
+</table></div></section>
+{% endblock %}

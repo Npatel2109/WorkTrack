@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Capture check-in selfie{% endblock %}
+{% block content %}
+<div class="workflow-wrap"><a class="back-link" href="{{ url_for('main.employee_dashboard') }}">Cancel visit</a>
+  <section class="workflow-card camera-card"><div class="workflow-step"><span>STEP 2</span><span class="step-line"></span><span class="muted">LIVE SELFIE</span></div>
+    <p class="eyebrow text-center mt-4">LOCATION VERIFIED · {{ site.site_name }}</p><h1 class="h2 text-center">Capture your check-in selfie</h1><p class="text-secondary text-center">Allow camera access and take a live photo to record your arrival.</p>
+    <div class="camera-frame"><video id="camera-video" autoplay playsinline muted aria-label="Live camera preview"></video><canvas id="camera-canvas" class="d-none"></canvas><img id="captured-preview" class="d-none" alt="Captured check-in selfie"><div id="camera-placeholder" class="camera-placeholder">Camera preview appears here</div></div>
+    <div id="camera-error" class="alert alert-danger d-none mt-3" role="alert"></div>
+    <div class="d-flex flex-wrap justify-content-center gap-2 mt-3"><button class="btn btn-outline-primary" id="start-camera" type="button">Enable camera</button><button class="btn btn-primary" id="capture-photo" type="button" disabled>Capture selfie</button><button class="btn btn-outline-secondary d-none" id="retake-photo" type="button">Retake</button></div>
+    <form id="checkin-form" method="post" action="{{ url_for('main.complete_checkin', site_id=site.id) }}" class="mt-3">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="selfie" id="selfie-data">
+      <button class="btn btn-success btn-lg w-100" id="submit-checkin" type="submit" disabled>Confirm check-in</button>
+    </form><p class="small text-center text-secondary mt-3 mb-0">The captured image is stored with your attendance record.</p>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/workflow.js') }}"></script>{% endblock %}

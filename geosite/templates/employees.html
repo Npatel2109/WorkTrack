@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Employee management{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">PEOPLE</p><h1>Employee management</h1><p class="text-secondary mb-0">Create accounts and manage field engineer access.</p></div></div>
+<div class="row g-4">
+  <div class="col-xl-4"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">NEW ACCOUNT</p><h2>Add employee</h2></div></div>
+    <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="form-label">Full name</label><input class="form-control mb-3" name="name" maxlength="120" required>
+      <label class="form-label">Email</label><input class="form-control mb-3" name="email" type="email" maxlength="255" required>
+      <label class="form-label">Mobile</label><input class="form-control mb-3" name="mobile" maxlength="40" required>
+      <label class="form-label">Designation</label><input class="form-control mb-3" name="designation" maxlength="120" required>
+      <label class="form-label">Initial password</label><input class="form-control mb-2" name="password" type="password" minlength="12" autocomplete="new-password" required>
+      <div class="form-text mb-3">Use at least 12 characters.</div><button class="btn btn-primary w-100">Create employee</button>
+    </form>
+  </section></div>
+  <div class="col-xl-8"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">DIRECTORY</p><h2>Team members <span class="count-badge">{{ employees|length }}</span></h2></div></div>
+    <div class="table-responsive"><table class="table align-middle">
+      <thead><tr><th>Employee</th><th>Mobile</th><th>Designation</th><th>Access</th><th>Actions</th></tr></thead>
+      <tbody>{% for employee in employees %}
+        <tr><td><div class="fw-semibold">{{ employee.name }}</div><div class="small text-secondary">{{ employee.email }}</div></td><td>{{ employee.mobile }}</td><td>{{ employee.designation }}</td>
+          <td><span class="status-pill {{ 'assigned' if employee.is_active else 'offline' }}">{{ 'Active' if employee.is_active else 'Disabled' }}</span></td>
+          <td><button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#edit-{{ employee.id }}">Edit</button>
+            <form class="d-inline" method="post" action="{{ url_for('main.delete_employee', user_id=employee.id) }}" onsubmit="return confirm('Delete or deactivate this employee?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger">Remove</button></form>
+          </td></tr>
+        <tr><td colspan="5" class="p-0"><div class="collapse p-3 bg-body-tertiary" id="edit-{{ employee.id }}">
+          <form class="row g-2" method="post" action="{{ url_for('main.edit_employee', user_id=employee.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-3"><input class="form-control form-control-sm" name="name" value="{{ employee.name }}" required></div>
+            <div class="col-md-3"><input class="form-control form-control-sm" name="email" type="email" value="{{ employee.email }}" required></div>
+            <div class="col-md-2"><input class="form-control form-control-sm" name="mobile" value="{{ employee.mobile }}" required></div>
+            <div class="col-md-2"><input class="form-control form-control-sm" name="designation" value="{{ employee.designation }}" required></div>
+            <div class="col-md-2"><button class="btn btn-sm btn-primary w-100">Save</button></div>
+          </form>
+          <form class="row g-2 mt-1" method="post" action="{{ url_for('main.reset_employee_password', user_id=employee.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-9"><input class="form-control form-control-sm" name="password" type="password" minlength="12" placeholder="New password (at least 12 characters)" required></div>
+            <div class="col-md-3"><button class="btn btn-sm btn-outline-secondary w-100">Reset password</button></div>
+          </form>
+        </div></td></tr>
+      {% else %}<tr><td colspan="5" class="empty-state">No employees yet. Create an account to get started.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section></div>
+</div>
+{% endblock %}

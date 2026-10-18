@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}My field dashboard{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">FIELD ENGINEER</p><h1>Hello, {{ current_user.name.split(' ')[0] }}</h1><p class="text-secondary mb-0">Your assigned sites, visit status, and recent reports.</p></div>{% if active_attendance %}<span class="status-pill onsite">Onsite now</span>{% endif %}</div>
+{% if active_attendance %}
+<section class="active-visit-card mb-4">
+  <div class="active-visit-top"><div><span class="eyebrow text-white-50">CURRENT VISIT</span><h2>{{ active_attendance.site.site_name }}</h2><p>{{ active_attendance.site.customer_name }} · {{ active_attendance.site.address }}</p></div><span class="status-pill onsite">ONSITE</span></div>
+  <div class="active-visit-bottom"><div><span class="small text-white-50">Checked in</span><div class="fw-semibold">{{ active_attendance.checkin_time.strftime("%d %b %Y · %H:%M UTC") }}</div></div><a class="btn btn-warning btn-lg" href="{{ url_for('main.checkout_location', attendance_id=active_attendance.id) }}">End site visit</a></div>
+</section>
+{% else %}
+<div class="row g-3 mb-4">{% for site in sites %}
+  <div class="col-md-6 col-xl-4"><article class="site-card site-card-action"><div class="site-pin">⌖</div><span class="eyebrow">{{ site.customer_name }}</span><h2>{{ site.site_name }}</h2><p class="text-secondary">{{ site.address }}</p><div class="small text-secondary mb-3">GPS radius: {{ site.allowed_radius|int }} m</div>
+    <form method="post" action="{{ url_for('main.start_visit', site_id=site.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-primary btn-lg w-100">Start site visit</button></form>
+    <a class="d-block small mt-3 text-center" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps/dir/?api=1&amp;destination={{ site.latitude }},{{ site.longitude }}">Open Google Maps directions</a>
+  </article></div>
+{% else %}<div class="col-12"><div class="panel-card empty-state py-5"><div class="empty-icon">⌖</div><h2>No site assigned yet</h2><p>Your administrator will assign your site location.</p></div></div>{% endfor %}</div>
+{% endif %}
+<section class="panel-card"><div class="section-title"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>My completed visits</h2></div><a href="{{ url_for('main.reports') }}">All reports</a></div>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Site</th><th>Customer</th><th>Check-in</th><th>Completed</th><th>Report</th></tr></thead>
+    <tbody>{% for attendance in reports %}<tr><td class="fw-semibold">{{ attendance.site.site_name }}</td><td>{{ attendance.site.customer_name }}</td><td>{{ attendance.checkin_time.strftime("%d %b %Y %H:%M") }}</td><td>{{ attendance.checkout_time.strftime("%d %b %Y %H:%M") }}</td><td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.download_pdf', attendance_id=attendance.id) }}">PDF</a></td></tr>
+    {% else %}<tr><td colspan="5" class="empty-state">Completed visits and reports will appear here.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}

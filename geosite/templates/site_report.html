@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Complete site report{% endblock %}
+{% block content %}
+<div class="workflow-wrap workflow-wide"><a class="back-link" href="{{ url_for('main.employee_dashboard') }}">Back to dashboard</a>
+  <section class="workflow-card"><div class="workflow-step"><span>STEP 2</span><span class="step-line"></span><span class="muted">VISIT REPORT &amp; SIGNATURES</span></div>
+    <div class="mt-4"><p class="eyebrow">CHECK-OUT VERIFIED</p><h1 class="h2">Complete site visit report</h1><p class="text-secondary">{{ attendance.site.site_name }} · {{ attendance.site.customer_name }}</p></div>
+    <div class="alert alert-info"><strong>Checked in:</strong> {{ attendance.checkin_time.strftime("%d %b %Y · %H:%M UTC") }}. Complete all fields and collect both signatures.</div>
+    <form method="post" id="site-report-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="row g-3">
+        {% for name, label, rows in [('work_performed','Work performed',3),('activities_completed','Activities completed',3),('issues_found','Issues found',2),('recommendations','Recommendations',2),('materials_used','Material used',2),('remarks','Remarks',2)] %}
+        <div class="col-md-6"><label class="form-label" for="{{ name }}">{{ label }} <span class="text-danger">*</span></label><textarea class="form-control" id="{{ name }}" name="{{ name }}" rows="{{ rows }}" required>{{ values.get(name, '') }}</textarea></div>
+        {% endfor %}
+        <div class="col-md-6"><label class="form-label" for="engineer_name">Engineer name *</label><input class="form-control" id="engineer_name" name="engineer_name" value="{{ values.get('engineer_name', current_user.name) }}" required></div>
+        <div class="col-md-6"><label class="form-label" for="customer_representative_name">Customer representative name *</label><input class="form-control" id="customer_representative_name" name="customer_representative_name" value="{{ values.get('customer_representative_name', '') }}" required></div>
+      </div>
+      <hr class="my-4"><div class="row g-4">
+        {% for signature_id, title in [('employee_signature','Engineer signature'),('customer_signature','Customer signature')] %}
+        <div class="col-md-6"><div class="signature-heading"><div><h2>{{ title }}</h2><p>Sign using touch or mouse.</p></div><button type="button" class="btn btn-sm btn-outline-secondary clear-signature">Clear</button></div>
+          <canvas class="signature-pad" data-input="{{ signature_id }}" aria-label="{{ title }} pad"></canvas><input type="hidden" id="{{ signature_id }}" name="{{ signature_id }}">
+        </div>
+        {% endfor %}
+      </div>
+      <div id="signature-error" class="text-danger small mt-2" role="alert"></div>
+      <button class="btn btn-success btn-lg w-100 mt-4" id="complete-visit" type="submit">Submit report &amp; complete visit</button>
+      <p class="small text-center text-secondary mt-3 mb-0">Your visit is complete after the report and both signatures are submitted.</p>
+    </form>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/workflow.js') }}"></script>{% endblock %}

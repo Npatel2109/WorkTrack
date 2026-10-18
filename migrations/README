@@ -1,0 +1,9 @@
+GeoSite database migrations
+
+Apply checked-in revisions with:
+    flask --app wsgi db upgrade
+
+Create future revisions with:
+    flask --app wsgi db migrate -m "describe the schema change"
+
+Review generated migrations before committing them.

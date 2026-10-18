@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Attendance history{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">AUDIT &amp; ATTENDANCE</p><h1>Attendance history</h1><p class="text-secondary mb-0">Site visit records and account access events.</p></div></div>
+<section class="panel-card mb-4"><div class="section-title"><div><p class="eyebrow">SITE VISITS</p><h2>Attendance records</h2></div></div>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Employee</th><th>Site</th><th>Check-in</th><th>Check-out</th><th>Check-in location</th><th>Status</th></tr></thead>
+    <tbody>{% for row in attendance %}<tr><td>{{ row.employee.name }}</td><td>{{ row.site.site_name }}</td><td>{{ row.checkin_time.strftime("%d %b %Y %H:%M") }}</td><td>{{ row.checkout_time.strftime("%d %b %Y %H:%M") if row.checkout_time else "—" }}</td><td>{{ "%.5f"|format(row.checkin_lat) }}, {{ "%.5f"|format(row.checkin_lon) }}</td><td><span class="status-pill {{ row.status }}">{{ row.status|title }}</span></td></tr>
+    {% else %}<tr><td colspan="6" class="empty-state">No attendance records.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+<section class="panel-card"><div class="section-title"><div><p class="eyebrow">ACCESS LOG</p><h2>Login / logout events</h2></div></div>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Time</th><th>User</th><th>Action</th><th>IP address</th><th>Details</th></tr></thead>
+    <tbody>{% for log in audit_logs %}<tr><td>{{ log.created_at.strftime("%d %b %Y · %H:%M:%S") }}</td><td>{{ log.user.name if log.user else "System" }}</td><td>{{ log.action|replace("_"," ")|title }}</td><td>{{ log.ip_address or "—" }}</td><td>{{ log.details or "—" }}</td></tr>
+    {% else %}<tr><td colspan="5" class="empty-state">No audit events recorded.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}

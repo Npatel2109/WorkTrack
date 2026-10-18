@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+<div class="login-shell">
+  <section class="login-card shadow-lg">
+    <div class="text-center mb-4">
+      <div class="login-symbol">G</div><p class="eyebrow mb-2">GEOSITE ATTENDANCE</p>
+      <h1 class="h3 fw-bold">Welcome back</h1>
+      <p class="text-secondary">Sign in to manage or report your site visits.</p>
+    </div>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="form-label" for="email">Email address</label>
+      <input class="form-control form-control-lg mb-3" id="email" type="email" name="email" autocomplete="username" required autofocus>
+      <label class="form-label" for="password">Password</label>
+      <input class="form-control form-control-lg mb-4" id="password" type="password" name="password" autocomplete="current-password" required>
+      <button class="btn btn-primary btn-lg w-100" type="submit">Sign in securely</button>
+    </form>
+    <div class="text-center mt-3"><a class="small" href="{{ url_for('main.forgot_password') }}">Forgot password?</a></div>
+    <div class="text-center mt-4 small text-secondary">Access is provided by your GeoSite administrator.</div>
+  </section>
+</div>
+{% endblock %}

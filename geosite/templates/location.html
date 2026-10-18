@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Verify location{% endblock %}
+{% block content %}
+<div class="workflow-wrap"><a class="back-link" href="{{ url_for('main.employee_dashboard') }}">Back to dashboard</a>
+  <section class="workflow-card"><div class="workflow-step"><span>STEP 1</span><span class="step-line"></span><span class="muted">LOCATION CHECK</span></div>
+    <div class="text-center py-3"><div class="gps-icon">⌖</div><p class="eyebrow">{{ "START SITE VISIT" if flow == "checkin" else "END SITE VISIT" }}</p><h1 class="h2">{{ site.site_name }}</h1><p class="text-secondary">{{ site.customer_name }}<br>{{ site.address }}</p>
+      <div class="location-radius">Allowed radius <strong>{{ site.allowed_radius|int }} meters</strong></div>
+      <button class="btn btn-primary btn-lg mt-4" id="verify-location" data-endpoint="{{ url_for('main.verify_checkin', site_id=site.id) if flow == 'checkin' else url_for('main.verify_checkout', attendance_id=attendance.id) }}">Use my current location</button>
+      <div id="gps-status" class="gps-feedback mt-4" role="status" aria-live="polite">Your browser will ask permission to access your location.</div>
+    </div>
+    <p class="small text-center text-secondary mb-0">You must be within {{ site.allowed_radius|int }} meters of the assigned site.</p>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/workflow.js') }}"></script>{% endblock %}

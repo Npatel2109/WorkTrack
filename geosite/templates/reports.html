@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Site reports{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">{{ "REPORTING" if current_user.is_admin else "MY HISTORY" }}</p><h1>{{ "Site reports" if current_user.is_admin else "My reports" }}</h1><p class="text-secondary mb-0">Review completed visits and download reports.</p></div>{% if current_user.is_admin %}<a class="btn btn-primary" href="{{ url_for('main.export_excel') }}">Export Excel</a>{% endif %}</div>
+<section class="panel-card">
+  <div class="row g-3 align-items-end mb-4">
+    <div class="col-lg"><p class="eyebrow mb-1">COMBINED PDF DOWNLOAD</p><div class="small text-secondary">Choose dates to combine matching reports into one PDF.</div></div>
+    <div class="col-md-3"><label class="form-label" for="start-date">From date</label><input class="form-control" id="start-date" type="date" required></div>
+    <div class="col-md-3"><label class="form-label" for="end-date">To date</label><input class="form-control" id="end-date" type="date" required></div>
+    <div class="col-md-auto"><button class="btn btn-primary" id="download-combined-pdf" type="button">Download merged PDF</button></div>
+  </div>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Engineer</th><th>Customer / site</th><th>Check-in</th><th>Check-out</th><th>Selfie</th><th>Report</th></tr></thead>
+    <tbody>{% for item in reports %}<tr>
+      <td><div class="fw-semibold">{{ item.employee.name }}</div><div class="small text-secondary">{{ item.employee.email }}</div></td>
+      <td>{{ item.site.customer_name }}<div class="small text-secondary">{{ item.site.site_name }}</div></td>
+      <td>{{ item.checkin_time.strftime("%d %b %Y · %H:%M") }}</td><td>{{ item.checkout_time.strftime("%d %b %Y · %H:%M") if item.checkout_time else "—" }}</td>
+      <td><a href="{{ url_for('main.media', filename=item.checkin_selfie) }}" target="_blank" rel="noopener noreferrer">View selfie</a></td><td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.download_pdf', attendance_id=item.id) }}">Download PDF</a></td>
+    </tr>{% else %}<tr><td colspan="6" class="empty-state">No completed reports yet.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById("download-combined-pdf").addEventListener("click", () => {
+  const start = document.getElementById("start-date");
+  const end = document.getElementById("end-date");
+  if (!start.value || !end.value) { (!start.value ? start : end).reportValidity(); return; }
+  if (end.value < start.value) { end.setCustomValidity("End date must be on or after start date."); end.reportValidity(); end.setCustomValidity(""); return; }
+  const params = new URLSearchParams({ start_date: start.value, end_date: end.value });
+  window.location.assign(`{{ url_for('main.download_combined_reports') }}?${params}`);
+});
+</script>
+{% endblock %}

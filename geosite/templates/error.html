@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ status }} error{% endblock %}
+{% block content %}
+<div class="error-page"><div class="error-code">{{ status }}</div>
+  <h1>{{ "Access denied" if status == 403 else "Page not found" if status == 404 else "Request too large" }}</h1>
+  <p class="text-secondary">{{ "You do not have permission to view this page." if status == 403 else "The requested page could not be found." if status == 404 else "Reduce the file size and try again." }}</p>
+  <a class="btn btn-primary" href="{{ url_for('main.index') }}">Back to GeoSite</a>
+</div>
+{% endblock %}

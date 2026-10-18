@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Admin dashboard{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">OVERVIEW</p><h1>Operations dashboard</h1><p class="text-secondary mb-0">Today's attendance and site activity at a glance.</p></div><a class="btn btn-outline-primary" href="{{ url_for('main.export_excel') }}">Export Excel</a></div>
+<div class="row g-3 mb-4">
+  {% for label, value, icon, tone, metric in [
+    ('Total employees', employee_count, '01', 'blue', 'employees'),
+    ('Assigned sites', site_count, '02', 'purple', 'sites'),
+    ('Currently onsite', onsite_count, '03', 'green', 'onsite'),
+    ('Completed today', completed_today, '04', 'orange', 'completed'),
+    ('Reports submitted', report_count, '05', 'slate', 'reports')
+  ] %}
+  <div class="col-6 col-xl"><a class="stat-card stat-card-link" href="{{ url_for('main.admin_metric', metric=metric) }}">
+    <div class="stat-icon {{ tone }}">{{ icon }}</div><div class="stat-label">{{ label }}</div><div class="stat-value" {% if metric == 'onsite' %}id="onsite-stat"{% endif %}>{{ value }}</div>
+  </a></div>
+  {% endfor %}
+</div>
+<div class="row g-4">
+  <div class="col-xl-8">
+    <section class="panel-card">
+      <div class="section-title"><div><p class="eyebrow">LIVE ATTENDANCE</p><h2>Employee status</h2></div><span class="live-dot-label"><i></i> Refreshes every 15 seconds</span></div>
+      <div class="table-responsive"><table class="table align-middle">
+        <thead><tr><th>Employee</th><th>Assigned site</th><th>Check-in time</th><th>Status</th></tr></thead>
+        <tbody id="live-status-body">{% for row in live_rows %}
+          <tr><td><div class="fw-semibold">{{ row.employee.name }}</div><div class="small text-secondary">{{ row.employee.designation }}</div></td>
+            <td>{{ row.site.site_name if row.site else "No site assigned" }}{% if row.site %}<div class="small text-secondary">{{ row.site.customer_name }}</div>{% endif %}</td>
+            <td>{{ row.attendance.checkin_time.strftime("%H:%M") if row.attendance else "—" }}</td><td><span class="status-pill {{ row.status }}">{{ row.status|title }}</span></td>
+          </tr>
+        {% else %}<tr><td colspan="4" class="empty-state">No employees have been added yet.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </section>
+    <section class="panel-card mt-4"><div class="section-title"><div><p class="eyebrow">FIELD TEAMS</p><h2>Assigned site map</h2></div></div>
+      <div id="live-map" class="map-canvas" aria-label="Map of assigned sites"></div>
+      <script type="application/json" id="map-sites">{{ live_rows|selectattr("site")|map(attribute="site")|map(attribute="latitude")|list|tojson }}</script>
+      <script type="application/json" id="map-data">{{ live_rows|selectattr("site")|map(attribute="site")|map(attribute="longitude")|list|tojson }}</script>
+      <script type="application/json" id="map-labels">{{ live_rows|selectattr("site")|map(attribute="site")|map(attribute="site_name")|list|tojson }}</script>
+    </section>
+  </div>
+  <div class="col-xl-4">
+    <section class="panel-card"><div class="section-title"><div><p class="eyebrow">LAST 7 DAYS</p><h2>Completed visits</h2></div></div>
+      <canvas id="completion-chart" height="230" aria-label="Completed visit chart"></canvas>
+      <script type="application/json" id="chart-labels">{{ chart_labels|tojson }}</script>
+      <script type="application/json" id="chart-values">{{ chart_values|tojson }}</script>
+    </section>
+    <section class="panel-card mt-4 quick-links"><p class="eyebrow">QUICK ACTIONS</p>
+      <a href="{{ url_for('main.employees') }}">Add or manage employees <span>→</span></a>
+      <a href="{{ url_for('main.sites') }}">Assign a site <span>→</span></a>
+      <a href="{{ url_for('main.reports') }}">Review site reports <span>→</span></a>
+      <a href="{{ url_for('main.invoices') }}">Generate invoices <span>→</span></a>
+      <a href="{{ url_for('main.attendance_history') }}">View access history <span>→</span></a>
+    </section>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>GeoSite.renderDashboardChart(); GeoSite.renderSiteMap(); GeoSite.startLiveStatusUpdates();</script>
+{% endblock %}
