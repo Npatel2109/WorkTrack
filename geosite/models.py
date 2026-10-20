@@ -46,6 +46,16 @@ class User(UserMixin, db.Model):
 class AppSettings(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     android_server_url = db.Column(db.String(500), nullable=False, default="")
+    android_download_enabled = db.Column(
+        db.Boolean, nullable=False, default=False, server_default=db.false()
+    )
+    public_base_url = db.Column(db.String(500), nullable=False, default="", server_default="")
+    mail_server = db.Column(db.String(255), nullable=False, default="", server_default="")
+    mail_port = db.Column(db.Integer, nullable=False, default=465, server_default="465")
+    mail_security = db.Column(db.String(10), nullable=False, default="ssl", server_default="ssl")
+    mail_username = db.Column(db.String(255), nullable=False, default="", server_default="")
+    mail_password = db.Column(db.String(500), nullable=False, default="", server_default="")
+    mail_sender = db.Column(db.String(255), nullable=False, default="", server_default="")
 
 
 class LeaveRequest(db.Model):

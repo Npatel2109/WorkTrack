@@ -7,13 +7,15 @@ import android.app.DownloadManager;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.Gravity;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
@@ -28,7 +30,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
-import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -37,23 +39,25 @@ import java.io.ByteArrayInputStream;
 public class MainActivity extends Activity {
     private static final int CAMERA_REQUEST = 10;
     private static final int LOCATION_REQUEST = 11;
-    private SharedPreferences preferences;
+    private final String server = AppConfig.SERVER;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable retry = this::retryConnection;
     private WebView webView;
     private LinearLayout root;
+    private LinearLayout offline;
     private TextView status;
-    private String server;
     private PermissionRequest cameraRequest;
     private GeolocationPermissions.Callback locationCallback;
     private String locationOrigin;
+    private String lastUrl;
     private boolean pageFailed;
 
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
-        preferences = getSharedPreferences("worktrack", MODE_PRIVATE);
-        server = preferences.getString("server", "");
-        if (server.isEmpty()) showSetup();
-        else showApp();
+        // Older builds let users type a server address; it is now fixed.
+        getSharedPreferences("worktrack", MODE_PRIVATE).edit().remove("server").apply();
+        showApp();
     }
 
     private Button button(String text, View.OnClickListener action) {
@@ -74,55 +78,6 @@ public class MainActivity extends Activity {
         });
         setContentView(root);
         root.requestApplyInsets();
-    }
-
-    private String validatedServer(String input) {
-        return ServerAddress.validate(input);
-    }
-
-    private void showSetup() {
-        makeRoot();
-        int padding = (int) (24 * getResources().getDisplayMetrics().density);
-        LinearLayout form = new LinearLayout(this);
-        form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(padding, padding, padding, padding);
-        TextView title = new TextView(this);
-        title.setText("Welcome to WorkTrack");
-        title.setTextSize(24);
-        form.addView(title);
-        TextView help = new TextView(this);
-        help.setText("Enter the HTTPS domain or local HTTP address shown on your administrator's login page. "
-            + "Local HTTP is for trusted same-Wi-Fi testing only: passwords/data are unencrypted and camera/GPS require HTTPS.");
-        form.addView(help);
-        EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
-            | android.text.InputType.TYPE_TEXT_VARIATION_URI);
-        input.setHint("https://worktrack.example.com");
-        input.setText(server);
-        form.addView(input);
-        form.addView(button("Connect", view -> {
-            String candidate = validatedServer(input.getText().toString());
-            if (candidate == null) {
-                input.setError("Use an HTTPS domain or a private IPv4 HTTP address, without a path, query or credentials.");
-                return;
-            }
-            if (candidate.startsWith("http:")) {
-                new AlertDialog.Builder(this).setTitle("Unencrypted local test connection")
-                    .setMessage("Passwords and data will travel unencrypted on this network. Camera/GPS workflows require HTTPS. Use only trusted Wi-Fi and test accounts.")
-                    .setNegativeButton("Cancel", null)
-                    .setPositiveButton("Connect for testing", (dialog, which) -> connect(candidate)).show();
-                return;
-            }
-            connect(candidate);
-        }));
-        root.addView(form);
-    }
-
-    private void connect(String candidate) {
-        server = candidate;
-        preferences.edit().putString("server", server).apply();
-        showApp();
     }
 
     private boolean sameOrigin(String value) {
@@ -147,25 +102,18 @@ public class MainActivity extends Activity {
         toolbar.addView(button("Back", view -> {
             if (webView.canGoBack()) webView.goBack();
         }));
-        toolbar.addView(button("Reload", view -> webView.reload()));
-        toolbar.addView(button("Server", view -> new AlertDialog.Builder(this)
-            .setTitle("Change server?")
-            .setMessage("This signs you out and clears local web data. Downloads are kept.")
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Change", (dialog, which) -> changeServer()).show()));
+        toolbar.addView(button("Reload", view -> retryConnection()));
         root.addView(toolbar);
-        if (server.startsWith("http:")) {
-            TextView warning = new TextView(this);
-            warning.setText("LOCAL HTTP TEST: unencrypted. Camera/GPS require HTTPS.");
-            warning.setTextColor(Color.RED);
-            root.addView(warning);
-        }
         status = new TextView(this);
         status.setPadding(12, 4, 12, 4);
         status.setText("Loading WorkTrack...");
         root.addView(status);
+        FrameLayout content = new FrameLayout(this);
         webView = new WebView(this);
-        root.addView(webView, new LinearLayout.LayoutParams(-1, 0, 1));
+        content.addView(webView, new FrameLayout.LayoutParams(-1, -1));
+        offline = offlineView();
+        content.addView(offline, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -183,7 +131,7 @@ public class MainActivity extends Activity {
                 if ("http".equals(request.getUrl().getScheme()) && !sameOrigin(url)) {
                     return new WebResourceResponse("text/plain", "UTF-8", 403,
                         "HTTP blocked", java.util.Collections.emptyMap(),
-                        new ByteArrayInputStream("Only the configured local HTTP server is allowed.".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                        new ByteArrayInputStream("Only the WorkTrack server is allowed.".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
                 }
                 return null;
             }
@@ -191,6 +139,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 pageFailed = false;
+                if (sameOrigin(url)) lastUrl = url;
                 status.setText("Loading WorkTrack...");
             }
 
@@ -204,7 +153,8 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                if (!pageFailed) status.setText("WorkTrack");
+                if (pageFailed) showOffline();
+                else showOnline();
                 CookieManager.getInstance().flush();
             }
 
@@ -212,7 +162,16 @@ public class MainActivity extends Activity {
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
                     pageFailed = true;
-                    status.setText("Could not connect. Check internet/server settings, then tap Reload.");
+                    showOffline();
+                }
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
+                // Proxy/server outages (502/503/504) mean the server is not reachable.
+                if (request.isForMainFrame() && response.getStatusCode() >= 502 && response.getStatusCode() <= 504) {
+                    pageFailed = true;
+                    showOffline();
                 }
             }
 
@@ -220,7 +179,7 @@ public class MainActivity extends Activity {
             public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
                 handler.cancel();
                 pageFailed = true;
-                status.setText("Untrusted HTTPS certificate. Ask your administrator to fix the server certificate.");
+                showOffline();
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
@@ -316,6 +275,43 @@ public class MainActivity extends Activity {
         webView.loadUrl(server + "/login");
     }
 
+    private LinearLayout offlineView() {
+        LinearLayout view = new LinearLayout(this);
+        view.setOrientation(LinearLayout.VERTICAL);
+        view.setGravity(Gravity.CENTER);
+        view.setBackgroundColor(Color.WHITE);
+        view.setVisibility(View.GONE);
+        TextView dash = new TextView(this);
+        dash.setText(AppConfig.OFFLINE_TEXT);
+        dash.setTextSize(64);
+        dash.setGravity(Gravity.CENTER);
+        dash.setContentDescription("Server not reachable");
+        view.addView(dash);
+        view.addView(button("Retry", button -> retryConnection()));
+        return view;
+    }
+
+    private void showOffline() {
+        if (offline == null) return;
+        offline.setVisibility(View.VISIBLE);
+        status.setText(AppConfig.OFFLINE_TEXT);
+        handler.removeCallbacks(retry);
+        handler.postDelayed(retry, AppConfig.RETRY_MILLIS);
+    }
+
+    private void showOnline() {
+        handler.removeCallbacks(retry);
+        if (offline != null) offline.setVisibility(View.GONE);
+        status.setText("WorkTrack");
+    }
+
+    private void retryConnection() {
+        handler.removeCallbacks(retry);
+        if (webView == null) return;
+        status.setText("Loading WorkTrack...");
+        webView.loadUrl(lastUrl != null ? lastUrl : server + "/login");
+    }
+
     @Override
     public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
@@ -339,30 +335,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void changeServer() {
-        if (cameraRequest != null) {
-            cameraRequest.deny();
-            cameraRequest = null;
-        }
-        if (locationCallback != null) {
-            locationCallback.invoke(locationOrigin, false, false);
-            locationCallback = null;
-        }
-        webView.stopLoading();
-        webView.clearHistory();
-        webView.clearCache(true);
-        webView.destroy();
-        webView = null;
-        android.webkit.WebStorage.getInstance().deleteAllData();
-        GeolocationPermissions.getInstance().clearAll();
-        CookieManager.getInstance().removeAllCookies(value -> {
-            CookieManager.getInstance().flush();
-            preferences.edit().remove("server").apply();
-            server = "";
-            showSetup();
-        });
-    }
-
     @Override
     public void onBackPressed() {
         if (webView != null && webView.canGoBack()) webView.goBack();
@@ -383,6 +355,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        handler.removeCallbacks(retry);
         if (cameraRequest != null) cameraRequest.deny();
         if (locationCallback != null) locationCallback.invoke(locationOrigin, false, false);
         if (webView != null) webView.destroy();

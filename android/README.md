@@ -36,45 +36,46 @@ Keep the release key backed up privately. Android updates require the same
 package/signing key and an increased versionCode in AndroidManifest.xml. Moving
 from a development key to a release key requires uninstalling the development app.
 
+## Fixed server
+
+The app always opens `AppConfig.SERVER` (`http://worktrack.blackpurple.in`), defined in
+`src/com/worktrack/mobile/AppConfig.java`. There is no setup screen or server switch;
+all screens and data come from that server, so web updates appear without reinstalling.
+If the server cannot be reached (no internet, DNS/connection failure or a 502-504 proxy
+error), the app shows `-` with a **Retry** button and retries every 15 seconds.
+
+To change the address (for example to HTTPS), edit `AppConfig.SERVER` and
+`ANDROID_SERVER_URL` in `geosite/__init__.py`, increase `versionCode` in
+`AndroidManifest.xml`, rebuild and redistribute the APK.
+
 ## Publish and install
 
-1. Apply Flask migrations: `.\.venv\Scripts\python.exe -m flask --app wsgi db upgrade`.
-2. Deploy the server using a public HTTPS origin and a trusted certificate.
-3. Copy the signed APK to `instance/downloads/worktrack.apk` on that server.
-4. Admin **Settings**: save this server's HTTPS origin or local private IPv4 HTTP
-   test origin (for example `http://192.168.1.6:5000`). Blank disables
-   the download. No download button appears if either the setting or APK is missing.
-5. Users download on the login page and permit APK installation from their browser.
-6. On first launch, users enter the exact server origin displayed on the login
-   page. The universal APK does not embed an administrator address. Use **Server**
-   to change it later; this clears cookies/cache/web storage and signs out.
+1. Apply Flask migrations on the server: `python -m flask --app wsgi db upgrade`.
+2. Copy the signed APK to `instance/downloads/worktrack.apk` on the server.
+3. Admin **Settings**: tick **Show "Download Android app" on the login page** and save.
+   No download button appears if the switch is off or the APK is missing.
+4. Users download on the login page and permit APK installation from their browser.
 
-Camera and precise GPS permissions are requested only when the configured HTTPS
-origin asks for them. Invalid certificates, mixed content and camera/GPS requests
-from other origins are not permitted. Local HTTP test mode requires confirmation
-and displays a persistent warning: passwords/data are unencrypted, and camera/GPS
-are unavailable. Only RFC1918 private IPv4 HTTP server addresses are accepted;
-public HTTP domains/IPs are rejected. Cleartext support is enabled in the manifest
-for dynamic local servers, with WebView HTTP requests restricted to the configured
-origin. Use trusted Wi-Fi and test accounts only. Maps/external HTTPS links open separately.
+Camera and precise GPS are requested only when the fixed server uses HTTPS; over
+HTTP they are denied, and requests from other origins are never permitted. WebView
+HTTP requests are restricted to the fixed origin, invalid certificates and mixed
+content are blocked, and maps/external HTTPS links open separately.
 Server-authenticated PDF/Excel downloads pass the session cookie to Android's
 Download Manager and use app-specific external storage, without broad storage
 permission. Open completed files from Android's download notification/Downloads;
 these files are removed when the app is uninstalled. Blob/data downloads are not
-supported (the existing server serves files via HTTPS).
+supported.
 
 ## Device acceptance checks
 
 Build/signature verification is not a substitute for physical-device testing.
 Before distributing to employees, test Android 8+ and a recent Android device:
 
-- Setup, wrong/unreachable server, offline/reload and invalid-certificate failure.
-- Local HTTP setup confirmation/warning, same-Wi-Fi login/leave/report testing,
-  and switching back to an HTTPS domain with the Server button.
+- First launch opens the fixed server directly; airplane mode/server stopped shows
+  `-`, and it recovers automatically or with Retry once the server is back.
 - Admin and employee login/logout, idle timeout and role-restricted pages.
 - Allow/deny camera and precise location, selfie/retake, GPS verification,
   activity/billing report and completed checkout; repeat after backgrounding/rotation.
 - Dashboard updates, address maps and external Google Maps navigation.
 - Full/half-day leave, approval, totals/date ranges and employee-only visibility.
 - Report/invoice PDF, merged PDF and Excel downloads/notifications/opening.
-- Server switching clears the old login; re-login and download work afterward.

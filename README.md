@@ -68,7 +68,7 @@ DATABASE_URL=postgresql://geosite_user:YOUR_PASSWORD@db-host:5432/geosite
 
 Do not use SQLite on a shared multi-instance production deployment. Keep the upload directory on persistent private storage and ensure it is not served as a public static directory.
 
-For password reset emails, set the SMTP host, port, credentials, sender, and `PUBLIC_BASE_URL` to the HTTPS URL of the deployed application. Test email delivery before allowing users to rely on self-service password recovery.
+For password reset emails, an administrator can open **Settings ? Email (password reset)**, enter the SMTP host, port, security, username, password, sender and public app address, then click **Save and send test email to me**. For GoDaddy Professional Email use `smtpout.secureserver.net`, port `465`, SSL. Saved settings are stored in the database (the password is never shown again) and override the `MAIL_*`/`PUBLIC_BASE_URL` environment variables, which remain as a fallback. `wsgi.py` loads `.env`, so Gunicorn picks these up too. Run `flask --app wsgi test-email you@example.com` to check delivery; it prints the SMTP error if sending fails. Test email delivery before allowing users to rely on self-service password recovery.
 
 ## Roles and workflows
 
@@ -233,32 +233,29 @@ reloader: tunnel ownership/status is local to one app process.
 Cloudflare proxies public traffic. Use strong passwords, test data and trusted
 users; the internet can reach the login page. Quick Tunnels are development-only,
 have no availability guarantee and change address on restart. No account/domain
-is needed. For the APK, click **Use link for Android download**, then **Save
-settings**. Installed apps must change their server manually. Stopping the tunnel
-does not silently replace or clear your saved Android address. Password-reset
-email links still use `PUBLIC_BASE_URL`; configure it separately if needed.
+is needed. The Android app always uses its built-in address and does not use
+tunnel links. Password-reset email links use the public app address from
+Settings (or `PUBLIC_BASE_URL`); configure it separately if needed.
 
 ## Android app
 
-The embedded Android client uses the same online app and permissions/roles. See
-[Android build and installation instructions](android/README.md). After building
-and publishing the signed APK, an administrator can open **Settings** and set this
-server's HTTPS origin or private-network HTTP test address. Only then does **Download Android app (APK)** appear
-on the login page. Clearing the setting hides the button and disables the download.
-The APK must also be present; a configured URL alone does not create an APK.
+The embedded Android client is a thin WebView shell around this web app, so screens,
+features, roles and data always come from the server; updating the server updates
+the app without reinstalling. Its server address is fixed at build time to
+`http://worktrack.blackpurple.in` (`AppConfig.SERVER` in the Android sources, mirrored
+by `ANDROID_SERVER_URL` in `geosite/__init__.py`). Users never enter an address. When
+the server is reachable the app shows live data; otherwise it shows `-` and retries
+automatically every 15 seconds (or on **Reload**/**Retry**).
 
-Users enter that server address once on first launch. Camera/GPS require Android
-permissions and valid HTTPS. The default local build is development-signed and
-requires device acceptance testing before employee distribution; use a private
+See [Android build and installation instructions](android/README.md). After building
+and copying the signed APK to `instance/downloads/worktrack.apk` on the server, an
+administrator enables **Show "Download Android app" on the login page** in **Settings**.
+
+The fixed address uses HTTP, so passwords and data are unencrypted and Android
+blocks camera/GPS site visits until the domain is served over HTTPS. To switch to
+HTTPS, change `AppConfig.SERVER` and `ANDROID_SERVER_URL`, increase `versionCode`, rebuild
+and redistribute the APK. The default local build is development-signed; use a private
 release signing key for production. No Play Store account is required for sideloading.
-
-For same-Wi-Fi testing, Settings and the Android app accept a private IPv4 HTTP
-origin, for example `http://192.168.1.6:5000`. Run Flask with
-`--host 0.0.0.0 --port 5000` and permit the port on private networks only.
-HTTP test mode is unencrypted and supports login, dashboards, leave and reports,
-not camera/GPS site visits. Use trusted Wi-Fi and test accounts. Public domain
-addresses must use HTTPS. After deploying, change Settings to the HTTPS domain
-and use the Android **Server** button to reconnect installed apps.
 
 ## Production serving
 

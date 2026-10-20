@@ -44,6 +44,8 @@ def create_app(test_config=None):
             "PUBLIC_BASE_URL", "http://127.0.0.1:5000"
         ),
         ANDROID_APK_PATH=str(Path(app.instance_path) / "downloads" / "worktrack.apk"),
+        # Must match AppConfig.SERVER in the Android app.
+        ANDROID_SERVER_URL="http://worktrack.blackpurple.in",
         CLOUDFLARED_PATH=os.environ.get(
             "CLOUDFLARED_PATH", str(Path(app.instance_path) / "tools" / "cloudflared.exe")
             if os.name == "nt" else "cloudflared"
@@ -136,6 +138,20 @@ def create_app(test_config=None):
         """Create the first administrator account."""
         admin = _create_admin(name, email, mobile, password)
         click.echo(f"Administrator created: {admin.email}")
+
+    @app.cli.command("test-email")
+    @click.argument("recipient")
+    def test_email(recipient):
+        """Send a test email using the admin-saved or MAIL_* settings and show any error."""
+        import smtplib
+
+        from .services import mail_settings, public_base_url, send_password_reset_email
+
+        try:
+            send_password_reset_email(app, recipient, public_base_url(app) + "/login")
+        except (OSError, RuntimeError, smtplib.SMTPException) as error:
+            raise click.ClickException(f"Email failed: {error!r}") from error
+        click.echo(f"Test email sent to {recipient} via {mail_settings(app)['server']}.")
 
     @app.cli.command("ensure-admin")
     def ensure_admin():

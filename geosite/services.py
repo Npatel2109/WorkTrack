@@ -19,6 +19,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import Image as PdfImage
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from .extensions import db
 from .models import AuditLog
 
 EARTH_RADIUS_METERS = 6_371_000
@@ -84,29 +85,60 @@ def write_audit(user, action, details=None, ip_address=None):
     )
 
 
+def mail_settings(app):
+    """Admin-saved settings win; otherwise fall back to MAIL_* environment config."""
+    from .models import AppSettings
+
+    saved = db.session.get(AppSettings, 1)
+    if saved and saved.mail_server:
+        return {
+            "server": saved.mail_server, "port": saved.mail_port,
+            "security": saved.mail_security, "username": saved.mail_username,
+            "password": saved.mail_password, "sender": saved.mail_sender,
+        }
+    port = app.config["MAIL_PORT"]
+    return {
+        "server": app.config["MAIL_SERVER"], "port": port,
+        "security": "ssl" if port == 465 else "starttls" if app.config["MAIL_USE_TLS"] else "none",
+        "username": app.config["MAIL_USERNAME"], "password": app.config["MAIL_PASSWORD"],
+        "sender": app.config["MAIL_DEFAULT_SENDER"],
+    }
+
+
+def public_base_url(app):
+    from .models import AppSettings
+
+    saved = db.session.get(AppSettings, 1)
+    return ((saved.public_base_url if saved else "") or app.config["PUBLIC_BASE_URL"]).rstrip("/")
+
+
 def send_password_reset_email(app, recipient, reset_url):
-    if not app.config["MAIL_SERVER"] or not app.config["MAIL_DEFAULT_SENDER"]:
-        raise RuntimeError("Password reset email is not configured.")
-    message = EmailMessage()
-    message["Subject"] = "Reset your GeoSite password"
-    message["From"] = app.config["MAIL_DEFAULT_SENDER"]
-    message["To"] = recipient
-    message.set_content(
+    send_email(
+        app, recipient, "Reset your GeoSite password",
         "A password reset was requested for your GeoSite account.\n\n"
         f"Use this one-time link within one hour:\n{reset_url}\n\n"
-        "If you did not request this, ignore this message."
+        "If you did not request this, ignore this message.",
     )
-    server = app.config["MAIL_SERVER"]
-    port = app.config["MAIL_PORT"]
+
+
+def send_email(app, recipient, subject, body):
+    config = mail_settings(app)
+    if not config["server"] or not config["sender"]:
+        raise RuntimeError("Password reset email is not configured.")
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = config["sender"]
+    message["To"] = recipient
+    message.set_content(body)
     with (
-        smtplib.SMTP_SSL(server, port, timeout=15)
-        if port == 465
-        else smtplib.SMTP(server, port, timeout=15)
+        smtplib.SMTP_SSL(config["server"], config["port"], timeout=15)
+        if config["security"] == "ssl"
+        else smtplib.SMTP(config["server"], config["port"], timeout=15)
     ) as smtp:
-        if port != 465 and app.config["MAIL_USE_TLS"]:
+        if config["security"] == "starttls":
             smtp.starttls()
-        if app.config["MAIL_USERNAME"]:
-            smtp.login(app.config["MAIL_USERNAME"], app.config["MAIL_PASSWORD"])
+        if config["username"]:
+            smtp.login(config["username"], config["password"])
         smtp.send_message(message)
 
 

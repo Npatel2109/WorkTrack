@@ -20,9 +20,8 @@
     {% if android_available %}
     <div class="mt-4 pt-3 border-top text-center">
       <a class="btn btn-outline-primary w-100" href="{{ url_for('main.download_android') }}">Download Android app (APK)</a>
-      <p class="small text-secondary mt-2 mb-1">After installing, enter this server address:</p>
+      <p class="small text-secondary mt-2 mb-1">The app connects automatically to:</p>
       <div class="small text-break fw-semibold">{{ android_server_url }}</div>
-      {% if android_server_url.startswith('http:') %}<p class="small text-danger mt-2">Local HTTP test server: same Wi-Fi required. Data is unencrypted; camera/GPS require HTTPS.</p>{% endif %}
       <p class="small text-secondary mt-2 mb-0">Android 8.0+. Allow installation from your browser when prompted. Only install APKs from your trusted administrator.</p>
     </div>
     {% endif %}

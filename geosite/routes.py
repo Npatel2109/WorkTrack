@@ -8,7 +8,6 @@ from decimal import Decimal, InvalidOperation
 from functools import wraps
 from pathlib import Path
 from urllib.parse import urlsplit
-import ipaddress
 
 from email_validator import EmailNotValidError, validate_email
 from flask import (
@@ -35,7 +34,9 @@ from .services import (
     generate_site_report_pdf,
     haversine_distance,
     merge_site_reports_pdf,
+    public_base_url,
     save_data_image,
+    send_email,
     send_password_reset_email,
     write_audit,
 )
@@ -268,11 +269,72 @@ def login():
     if request.args.get("expired"):
         flash("Your session expired. Please sign in again.", "warning")
     settings = db.session.get(AppSettings, 1)
-    android_url = settings.android_server_url if settings else ""
     return render_template(
-        "login.html", android_server_url=android_url,
-        android_available=bool(android_url) and Path(current_app.config["ANDROID_APK_PATH"]).is_file(),
+        "login.html", android_server_url=current_app.config["ANDROID_SERVER_URL"],
+        android_available=bool(settings and settings.android_download_enabled)
+        and Path(current_app.config["ANDROID_APK_PATH"]).is_file(),
     )
+
+
+def _clean_base_url(value):
+    value = value.strip().rstrip("/")
+    if not value:
+        return ""
+    parsed = urlsplit(value)
+    if (
+        len(value) > 500 or parsed.scheme not in ("https", "http") or not parsed.hostname
+        or parsed.username or parsed.password or parsed.query or parsed.fragment
+        or parsed.path not in ("", "/") or any(character.isspace() for character in value)
+        or "\\" in value
+    ):
+        raise ValueError("Enter the public address without a path, for example http://worktrack.blackpurple.in.")
+    try:
+        port = parsed.port
+    except ValueError:
+        raise ValueError("Enter a valid port in the public address.") from None
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError("Enter a valid port in the public address.")
+    return value
+
+
+def _save_mail_settings(settings):
+    form = request.form
+    server = form.get("mail_server", "").strip().lower()
+    sender = form.get("mail_sender", "").strip()
+    username = form.get("mail_username", "").strip()
+    security = form.get("mail_security", "ssl")
+    if security not in ("ssl", "starttls", "none"):
+        raise ValueError("Choose a valid connection security option.")
+    try:
+        port = int(form.get("mail_port", "465"))
+    except ValueError:
+        raise ValueError("Enter a numeric SMTP port.") from None
+    if not 1 <= port <= 65535:
+        raise ValueError("Enter an SMTP port between 1 and 65535.")
+    if len(server) > 255 or any(character.isspace() or character in "/\\:@" for character in server):
+        raise ValueError("Enter only the SMTP host name, for example smtpout.secureserver.net.")
+    if server and not sender:
+        raise ValueError("Enter the sender email address.")
+    if sender:
+        try:
+            sender = validate_email(sender, check_deliverability=False).normalized
+        except EmailNotValidError:
+            raise ValueError("Enter a valid sender email address.") from None
+    if len(username) > 255:
+        raise ValueError("The SMTP username is too long.")
+    password = form.get("mail_password", "")
+    if len(password) > 500:
+        raise ValueError("The SMTP password is too long.")
+    settings.public_base_url = _clean_base_url(form.get("public_base_url", ""))
+    settings.mail_server = server
+    settings.mail_port = port
+    settings.mail_security = security
+    settings.mail_username = username
+    settings.mail_sender = sender
+    if form.get("clear_mail_password") == "yes":
+        settings.mail_password = ""
+    elif password:
+        settings.mail_password = password
 
 
 @bp.route("/admin/settings", methods=["GET", "POST"])
@@ -280,51 +342,51 @@ def login():
 def app_settings():
     settings = db.session.get(AppSettings, 1)
     if request.method == "POST":
-        server_url = request.form.get("android_server_url", "").strip().rstrip("/")
-        try:
-            if server_url:
-                parsed = urlsplit(server_url)
-                if (
-                    len(server_url) > 500 or parsed.scheme not in ("https", "http")
-                    or not parsed.hostname or parsed.username or parsed.password
-                    or parsed.query or parsed.fragment or parsed.path not in ("", "/")
-                    or any(character.isspace() for character in server_url)
-                    or "\\" in server_url or parsed.hostname.endswith(".localhost")
-                    or parsed.hostname in ("localhost", "localhost.localdomain")
-                ):
-                    raise ValueError
-                if parsed.port is not None and not 1 <= parsed.port <= 65535:
-                    raise ValueError
-                try:
-                    address = ipaddress.ip_address(parsed.hostname)
-                except ValueError:
-                    if "." not in parsed.hostname or parsed.scheme != "https":
-                        raise ValueError("Public hostnames require HTTPS.")
-                else:
-                    local_network = any(address in network for network in (
-                        ipaddress.ip_network("10.0.0.0/8"),
-                        ipaddress.ip_network("172.16.0.0/12"),
-                        ipaddress.ip_network("192.168.0.0/16"),
-                    )) if address.version == 4 else False
-                    if not address.is_global and not local_network:
-                        raise ValueError
-                    if parsed.scheme == "http" and not local_network:
-                        raise ValueError
-        except ValueError:
-            flash("Enter an HTTPS domain or a private-network HTTP address, such as http://192.168.1.6:5000, without a path, credentials or query. Leave blank to hide the download.", "danger")
-        else:
-            if settings is None:
-                settings = AppSettings(id=1)
-                db.session.add(settings)
-            settings.android_server_url = server_url
-            write_audit(current_user, "android_settings_updated", server_url or "Download disabled")
+        section = request.form.get("section", "android")
+        if section not in ("android", "mail"):
+            abort(400)
+        if settings is None:
+            settings = AppSettings(id=1)
+            db.session.add(settings)
+        if section == "android":
+            settings.android_download_enabled = request.form.get("android_download_enabled") == "yes"
+            write_audit(current_user, "android_settings_updated",
+                        "Download enabled" if settings.android_download_enabled else "Download disabled")
             db.session.commit()
             flash("Android app settings saved.", "success")
             return redirect(url_for("main.app_settings"))
+        try:
+            _save_mail_settings(settings)
+        except ValueError as error:
+            db.session.rollback()
+            flash(str(error), "danger")
+            settings = db.session.get(AppSettings, 1)
+        else:
+            write_audit(current_user, "mail_settings_updated",
+                        f"{settings.mail_server or 'environment settings'}:{settings.mail_port}")
+            db.session.commit()
+            if request.form.get("action") == "test":
+                try:
+                    send_email(
+                        current_app, current_user.email, "WorkTrack test email",
+                        "Your WorkTrack email settings are working. Password reset emails will "
+                        f"link to {public_base_url(current_app)}.",
+                    )
+                except (OSError, RuntimeError, smtplib.SMTPException) as error:
+                    current_app.logger.warning("Test email failed: %r", error)
+                    flash(f"Settings saved, but the test email failed: {error}", "danger")
+                else:
+                    flash(f"Settings saved. Test email sent to {current_user.email}.", "success")
+            else:
+                flash("Email settings saved.", "success")
+            return redirect(url_for("main.app_settings", _anchor="email-settings"))
     return render_template(
         "settings.html", settings=settings,
+        android_server_url=current_app.config["ANDROID_SERVER_URL"],
         apk_ready=Path(current_app.config["ANDROID_APK_PATH"]).is_file(),
         tunnel=current_app.extensions["quick_tunnel"].snapshot(),
+        env_mail_server=current_app.config["MAIL_SERVER"],
+        env_public_url=current_app.config["PUBLIC_BASE_URL"],
     )
 
 
@@ -367,7 +429,7 @@ def tunnel_status():
 def download_android():
     settings = db.session.get(AppSettings, 1)
     path = Path(current_app.config["ANDROID_APK_PATH"])
-    if not settings or not settings.android_server_url or not path.is_file():
+    if not settings or not settings.android_download_enabled or not path.is_file():
         abort(404)
     response = send_file(
         path, mimetype="application/vnd.android.package-archive",
@@ -388,7 +450,7 @@ def forgot_password():
                 {"user_id": user.id, "password_hash": user.password_hash}
             )
             reset_url = (
-                current_app.config["PUBLIC_BASE_URL"].rstrip("/")
+                public_base_url(current_app)
                 + url_for("main.reset_password", token=token)
             )
             try:

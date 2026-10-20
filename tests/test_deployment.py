@@ -61,6 +61,25 @@ class DeploymentTests(unittest.TestCase):
         result = self.run_ensure_admin({**ADMIN_ENV, "ADMIN_PASSWORD": "short"})
         self.assertNotEqual(result.exit_code, 0)
 
+    def test_test_email_reports_missing_configuration(self):
+        self.app.config.update(MAIL_SERVER="", MAIL_DEFAULT_SENDER="")
+        result = self.app.test_cli_runner().invoke(args=["test-email", "a@example.com"])
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("not configured", result.output)
+
+    def test_test_email_sends_with_configured_smtp(self):
+        self.app.config.update(
+            MAIL_SERVER="smtp.example.com", MAIL_PORT=587, MAIL_USE_TLS=True,
+            MAIL_USERNAME="user", MAIL_PASSWORD="pw", MAIL_DEFAULT_SENDER="from@example.com",
+        )
+        with mock.patch("smtplib.SMTP") as smtp:
+            result = self.app.test_cli_runner().invoke(args=["test-email", "a@example.com"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        client = smtp.return_value.__enter__.return_value
+        client.starttls.assert_called_once()
+        client.login.assert_called_once_with("user", "pw")
+        self.assertEqual(client.send_message.call_args[0][0]["To"], "a@example.com")
+
     def test_trust_proxy_uses_forwarded_scheme_and_client(self):
         with mock.patch.dict(os.environ, {"TRUST_PROXY": "1"}):
             app = create_app(self.config)

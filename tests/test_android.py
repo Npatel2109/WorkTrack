@@ -8,7 +8,7 @@ from geosite.extensions import db
 from geosite.models import AppSettings, AuditLog, User
 
 
-class AndroidDownloadTests(unittest.TestCase):
+class SettingsTestCase(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.apk = Path(self.folder.name) / "test.apk"
@@ -39,6 +39,8 @@ class AndroidDownloadTests(unittest.TestCase):
     def login(self, user):
         self.client.post("/login", data={"email": user.email, "password": "test-password-123"})
 
+
+class AndroidDownloadTests(SettingsTestCase):
     def test_download_requires_both_setting_and_published_file(self):
         self.assertNotIn(b"Download Android app", self.client.get("/login").data)
         self.assertEqual(self.client.get("/download/android").status_code, 404)
@@ -46,14 +48,16 @@ class AndroidDownloadTests(unittest.TestCase):
         self.assertEqual(self.client.get("/download/android").status_code, 404)
         self.login(self.admin)
         response = self.client.post("/admin/settings", data={
-            "android_server_url": "https://worktrack.example.com/",
+            "section": "android", "android_download_enabled": "yes",
         }, follow_redirects=True)
         self.assertIn(b"settings saved", response.data)
-        self.assertEqual(db.session.get(AppSettings, 1).android_server_url, "https://worktrack.example.com")
+        self.assertTrue(db.session.get(AppSettings, 1).android_download_enabled)
         self.assertIsNotNone(AuditLog.query.filter_by(action="android_settings_updated").first())
         self.client.post("/logout")
-        self.assertIn(b"Download Android app", self.client.get("/login").data)
-        self.assertIn(b"https://worktrack.example.com", self.client.get("/login").data)
+        login_page = self.client.get("/login").data
+        self.assertIn(b"Download Android app", login_page)
+        self.assertIn(b"http://worktrack.blackpurple.in", login_page)
+        self.assertNotIn(b"enter this server address", login_page)
         response = self.client.get("/download/android")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.mimetype, "application/vnd.android.package-archive")
@@ -63,58 +67,26 @@ class AndroidDownloadTests(unittest.TestCase):
         self.apk.unlink()
         self.assertNotIn(b"Download Android app", self.client.get("/login").data)
         self.assertEqual(self.client.get("/download/android").status_code, 404)
+        self.apk.write_bytes(b"test apk fixture")
         self.login(self.admin)
-        self.client.post("/admin/settings", data={"android_server_url": ""})
-        self.assertEqual(db.session.get(AppSettings, 1).android_server_url, "")
+        self.client.post("/admin/settings", data={"section": "android"})
+        self.assertFalse(db.session.get(AppSettings, 1).android_download_enabled)
+        self.assertEqual(self.client.get("/download/android").status_code, 404)
 
     def test_admin_only_settings_and_csrf(self):
         self.assertEqual(self.client.get("/admin/settings").status_code, 302)
         self.login(self.employee)
         self.assertEqual(self.client.get("/admin/settings").status_code, 403)
-        self.assertEqual(self.client.post("/admin/settings", data={}).status_code, 403)
+        self.assertEqual(self.client.post("/admin/settings", data={"section": "mail"}).status_code, 403)
         self.client.post("/logout")
         self.login(self.admin)
-        self.assertEqual(self.client.get("/admin/settings").status_code, 200)
+        page = self.client.get("/admin/settings")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"http://worktrack.blackpurple.in", page.data)
+        self.assertEqual(self.client.post("/admin/settings", data={"section": "bad"}).status_code, 400)
         self.app.config["WTF_CSRF_ENABLED"] = True
         self.assertEqual(self.client.post("/admin/settings", data={}).status_code, 400)
 
-    def test_invalid_servers_do_not_enable_download(self):
-        self.login(self.admin)
-        for url in (
-            "http://example.com", "https://localhost",
-            "https://127.0.0.1", "https://[::1]",
-            "http://127.0.0.1:5000", "http://8.8.8.8", "http://172.32.0.1",
-            "http://192.168.1.999", "http://169.254.1.1", "http://192.168.1.6:0",
-            "https://example.com/path", "https://example.com?q=secret",
-            "https://name:password@example.com", "https://example.com#section",
-            "https://example.com:invalid", "https://example.com:99999",
-            "https://exam ple.com", "https://example.com\\evil", "https://intranet",
-        ):
-            with self.subTest(url=url):
-                response = self.client.post("/admin/settings", data={"android_server_url": url})
-                self.assertIn(b"Enter an HTTPS domain or a private-network HTTP address", response.data)
-                self.assertIsNone(db.session.get(AppSettings, 1))
-
-    def test_private_network_addresses_and_https_domain_are_saved(self):
-        self.apk.write_bytes(b"test apk fixture")
-        self.login(self.admin)
-        for url in (
-            "http://192.168.1.6:5000", "http://10.0.0.5:5000",
-            "http://172.16.0.5:5000", "http://172.31.255.254",
-            "https://192.168.1.6:5000", "https://worktrack.example.com",
-        ):
-            with self.subTest(url=url):
-                response = self.client.post("/admin/settings", data={"android_server_url": url})
-                self.assertEqual(response.status_code, 302)
-                self.assertEqual(db.session.get(AppSettings, 1).android_server_url, url)
-        self.client.post("/admin/settings", data={"android_server_url": "http://192.168.1.6:5000"})
-        self.client.post("/logout")
-        response = self.client.get("/login")
-        self.assertIn(b"Download Android app", response.data)
-        self.assertIn(b"Local HTTP test server", response.data)
-        response = self.client.get("/download/android")
-        self.assertEqual(response.status_code, 200)
-        response.close()
 
     def test_tunnel_controls_require_admin_confirmation_and_non_debug(self):
         url = "/admin/settings/tunnel"
@@ -152,3 +124,81 @@ class AndroidDownloadTests(unittest.TestCase):
                 "action": "start", "confirm_public": "yes",
             }, follow_redirects=True)
         self.assertIn(b"cloudflared is not installed", response.data)
+
+
+class MailSettingsTests(SettingsTestCase):
+    MAIL = {
+        "section": "mail", "action": "save",
+        "public_base_url": "http://worktrack.blackpurple.in/",
+        "mail_server": "smtpout.secureserver.net", "mail_port": "465",
+        "mail_security": "ssl", "mail_username": "noreply@blackpurple.in",
+        "mail_password": "mailbox-secret", "mail_sender": "noreply@blackpurple.in",
+    }
+
+    def test_admin_saves_mail_settings_and_password_is_never_shown(self):
+        self.login(self.admin)
+        response = self.client.post("/admin/settings", data=self.MAIL, follow_redirects=True)
+        self.assertIn(b"Email settings saved", response.data)
+        self.assertNotIn(b"mailbox-secret", response.data)
+        saved = db.session.get(AppSettings, 1)
+        self.assertEqual((saved.mail_server, saved.mail_port, saved.mail_security),
+                         ("smtpout.secureserver.net", 465, "ssl"))
+        self.assertEqual(saved.mail_password, "mailbox-secret")
+        self.assertEqual(saved.public_base_url, "http://worktrack.blackpurple.in")
+        self.assertIsNotNone(AuditLog.query.filter_by(action="mail_settings_updated").first())
+        self.assertNotIn("mailbox-secret", AuditLog.query.filter_by(action="mail_settings_updated").first().details)
+        self.client.post("/admin/settings", data={**self.MAIL, "mail_password": ""})
+        self.assertEqual(db.session.get(AppSettings, 1).mail_password, "mailbox-secret")
+        self.client.post("/admin/settings", data={**self.MAIL, "mail_password": "", "clear_mail_password": "yes"})
+        self.assertEqual(db.session.get(AppSettings, 1).mail_password, "")
+
+    def test_invalid_mail_settings_are_rejected(self):
+        self.login(self.admin)
+        for field, value in (
+            ("mail_port", "abc"), ("mail_port", "70000"), ("mail_security", "tls1"),
+            ("mail_server", "smtp://host"), ("mail_server", "bad host"),
+            ("mail_sender", "not-an-email"), ("mail_sender", ""),
+            ("public_base_url", "ftp://example.com"), ("public_base_url", "http://example.com/path"),
+            ("public_base_url", "http://example.com:99999"),
+        ):
+            with self.subTest(field=field, value=value):
+                response = self.client.post("/admin/settings", data={**self.MAIL, field: value})
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(b"alert-danger", response.data)
+                saved = db.session.get(AppSettings, 1)
+                self.assertTrue(saved is None or saved.mail_server == "")
+
+    def test_saved_settings_are_used_for_reset_and_test_email(self):
+        self.login(self.admin)
+        with patch("smtplib.SMTP_SSL") as smtp:
+            response = self.client.post("/admin/settings", data={**self.MAIL, "action": "test"},
+                                        follow_redirects=True)
+        self.assertIn(b"Test email sent to admin@example.com", response.data)
+        smtp.assert_called_once_with("smtpout.secureserver.net", 465, timeout=15)
+        client = smtp.return_value.__enter__.return_value
+        client.login.assert_called_once_with("noreply@blackpurple.in", "mailbox-secret")
+        client.starttls.assert_not_called()
+        self.client.post("/logout")
+        with patch("smtplib.SMTP_SSL") as smtp:
+            self.client.post("/forgot-password", data={"email": "employee@example.com"})
+        message = smtp.return_value.__enter__.return_value.send_message.call_args[0][0]
+        self.assertEqual(message["To"], "employee@example.com")
+        self.assertEqual(message["From"], "noreply@blackpurple.in")
+        self.assertIn("http://worktrack.blackpurple.in/reset-password/", message.get_content())
+
+    def test_failed_test_email_shows_error(self):
+        self.login(self.admin)
+        with patch("smtplib.SMTP_SSL", side_effect=OSError("connection timed out")):
+            response = self.client.post("/admin/settings", data={**self.MAIL, "action": "test"},
+                                        follow_redirects=True)
+        self.assertIn(b"test email failed: connection timed out", response.data)
+        self.assertEqual(db.session.get(AppSettings, 1).mail_server, "smtpout.secureserver.net")
+
+    def test_starttls_security_uses_plain_smtp_then_starttls(self):
+        self.login(self.admin)
+        with patch("smtplib.SMTP") as smtp:
+            self.client.post("/admin/settings", data={
+                **self.MAIL, "action": "test", "mail_port": "587", "mail_security": "starttls",
+            })
+        smtp.assert_called_once_with("smtpout.secureserver.net", 587, timeout=15)
+        smtp.return_value.__enter__.return_value.starttls.assert_called_once()
