@@ -9,7 +9,7 @@ from geosite.models import User
 
 
 ADMIN_ENV = {
-    "ADMIN_NAME": "Render Admin",
+    "ADMIN_NAME": "Deployment Admin",
     "ADMIN_EMAIL": "Admin@Example.com",
     "ADMIN_MOBILE": "9999999999",
     "ADMIN_PASSWORD": "a-strong-password",

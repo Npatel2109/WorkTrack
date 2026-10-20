@@ -62,7 +62,7 @@ def create_app(test_config=None):
         ].replace("postgresql://", "postgresql+psycopg://", 1)
     if test_config:
         app.config.update(test_config)
-    # Render and similar hosts terminate HTTPS at one proxy hop.
+    # Trust exactly one HTTPS reverse proxy when explicitly configured.
     if os.environ.get("TRUST_PROXY", "0") == "1":
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
