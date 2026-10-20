@@ -43,6 +43,48 @@ class User(UserMixin, db.Model):
         return self.role == "admin"
 
 
+class AppSettings(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    android_server_url = db.Column(db.String(500), nullable=False, default="")
+
+
+class LeaveRequest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    period = db.Column(db.String(20), nullable=False)
+    reason = db.Column(db.String(2000), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="pending", index=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime(timezone=True))
+
+    employee = db.relationship("User", foreign_keys=[employee_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+
+    __table_args__ = (
+        db.CheckConstraint("end_date >= start_date", name="leave_date_order"),
+        db.CheckConstraint(
+            "period IN ('full', 'morning', 'afternoon')", name="leave_valid_period"
+        ),
+        db.CheckConstraint(
+            "period = 'full' OR start_date = end_date", name="leave_half_day_date"
+        ),
+        db.CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected')", name="leave_valid_status"
+        ),
+    )
+
+    @property
+    def days(self):
+        return (self.end_date - self.start_date).days + 1 if self.period == "full" else 0.5
+
+    @property
+    def period_label(self):
+        return {"full": "Full day", "morning": "Half day - morning", "afternoon": "Half day - afternoon"}[self.period]
+
+
 class AssignedSite(db.Model):
     __tablename__ = "assigned_sites"
 
@@ -50,6 +92,13 @@ class AssignedSite(db.Model):
     employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     site_name = db.Column(db.String(160), nullable=False)
     customer_name = db.Column(db.String(160), nullable=False)
+    project_name = db.Column(db.String(250), nullable=False, default="", server_default="")
+    po_number = db.Column(db.String(120), nullable=False, default="", server_default="")
+    po_date = db.Column(db.Date)
+    report_company = db.Column(db.String(160), nullable=False, default="", server_default="")
+    commissioning_manager = db.Column(db.String(120), nullable=False, default="", server_default="")
+    project_manager = db.Column(db.String(120), nullable=False, default="", server_default="")
+    report_remarks = db.Column(db.Text, nullable=False, default="", server_default="")
     address = db.Column(db.Text, nullable=False)
     latitude = db.Column(db.Float, nullable=False)
     longitude = db.Column(db.Float, nullable=False)
@@ -90,6 +139,7 @@ class SiteReport(db.Model):
         db.Integer, db.ForeignKey("attendance.id"), nullable=False, unique=True
     )
     work_performed = db.Column(db.Text, nullable=False)
+    is_billable = db.Column(db.Boolean)
     activities_completed = db.Column(db.Text, nullable=False)
     issues_found = db.Column(db.Text, nullable=False)
     recommendations = db.Column(db.Text, nullable=False)

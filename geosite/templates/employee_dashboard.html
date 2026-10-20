@@ -2,6 +2,15 @@
 {% block title %}My field dashboard{% endblock %}
 {% block content %}
 <div class="page-heading"><div><p class="eyebrow">FIELD ENGINEER</p><h1>Hello, {{ current_user.name.split(' ')[0] }}</h1><p class="text-secondary mb-0">Your assigned sites, visit status, and recent reports.</p></div>{% if active_attendance %}<span class="status-pill onsite">Onsite now</span>{% endif %}</div>
+<section class="panel-card mb-4">
+  <div class="section-title"><div><p class="eyebrow">TIME OFF</p><h2>My leave requests</h2></div><a class="btn btn-outline-primary" href="{{ url_for('main.employee_leaves') }}">Apply / view all leave</a></div>
+  {% for leave in leave_requests %}
+  <div class="d-flex flex-wrap justify-content-between gap-2 py-2 border-bottom">
+    <span>{{ leave.start_date.strftime("%d %b %Y") }} to {{ leave.end_date.strftime("%d %b %Y") }} <span class="text-secondary small">({{ leave.period_label }})</span></span>
+    <span class="status-pill {{ leave.status }}">{{ leave.status|title }}</span>
+  </div>
+  {% else %}<p class="text-secondary mb-0">No leave requests yet. Apply for a full day or a morning/afternoon half day.</p>{% endfor %}
+</section>
 {% if active_attendance %}
 <section class="active-visit-card mb-4">
   <div class="active-visit-top"><div><span class="eyebrow text-white-50">CURRENT VISIT</span><h2>{{ active_attendance.site.site_name }}</h2><p>{{ active_attendance.site.customer_name }} · {{ active_attendance.site.address }}</p></div><span class="status-pill onsite">ONSITE</span></div>

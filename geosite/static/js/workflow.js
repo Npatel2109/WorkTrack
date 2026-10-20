@@ -13,6 +13,13 @@
     verifyButton.textContent = "Requesting GPS...";
     feedback.className = "gps-feedback mt-4";
     feedback.textContent = "Waiting for a precise location fix.";
+    if (!window.isSecureContext) {
+      feedback.classList.add("error");
+      feedback.textContent = "GPS requires HTTPS. Local HTTP supports dashboard testing only; connect to your administrator's HTTPS server for site visits.";
+      verifyButton.disabled = false;
+      verifyButton.textContent = "Try again";
+      return;
+    }
     if (!navigator.geolocation) {
       feedback.classList.add("error");
       feedback.textContent = "This browser does not support location services.";
@@ -73,6 +80,11 @@
     let stream;
     start.addEventListener("click", async () => {
       errorBox.classList.add("d-none");
+      if (!window.isSecureContext) {
+        errorBox.textContent = "The camera requires HTTPS. Connect to your administrator's HTTPS server to capture a live selfie.";
+        errorBox.classList.remove("d-none");
+        return;
+      }
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
@@ -124,62 +136,4 @@
     });
   }
 
-  const pads = document.querySelectorAll(".signature-pad");
-  if (pads.length) {
-    const signatures = new Map();
-    pads.forEach((element) => {
-      const ratio = Math.max(window.devicePixelRatio || 1, 1);
-      const bounds = element.getBoundingClientRect();
-      element.width = bounds.width * ratio;
-      element.height = bounds.height * ratio;
-      const context = element.getContext("2d");
-      context.scale(ratio, ratio);
-      context.lineWidth = 2.3;
-      context.lineCap = "round";
-      context.lineJoin = "round";
-      context.strokeStyle = "#17243a";
-      const state = { context, drawing: false, drawn: false, input: element.dataset.input };
-      signatures.set(element, state);
-      const point = (event) => {
-        const rect = element.getBoundingClientRect();
-        return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-      };
-      element.addEventListener("pointerdown", (event) => {
-        event.preventDefault();
-        element.setPointerCapture(event.pointerId);
-        const p = point(event);
-        context.beginPath();
-        context.moveTo(p.x, p.y);
-        state.drawing = true;
-        state.drawn = true;
-      });
-      element.addEventListener("pointermove", (event) => {
-        if (!state.drawing) return;
-        const p = point(event);
-        context.lineTo(p.x, p.y);
-        context.stroke();
-      });
-      const stop = () => { state.drawing = false; };
-      element.addEventListener("pointerup", stop);
-      element.addEventListener("pointercancel", stop);
-      element.closest(".col-md-6").querySelector(".clear-signature").addEventListener("click", () => {
-        context.clearRect(0, 0, bounds.width, bounds.height);
-        state.drawn = false;
-        document.getElementById(state.input).value = "";
-      });
-    });
-    document.getElementById("site-report-form").addEventListener("submit", (event) => {
-      if ([...signatures.values()].some((state) => !state.drawn)) {
-        event.preventDefault();
-        document.getElementById("signature-error").textContent = "Both signatures are required.";
-        return;
-      }
-      signatures.forEach((state, element) => {
-        document.getElementById(state.input).value = element.toDataURL("image/png");
-      });
-      const button = document.getElementById("complete-visit");
-      button.disabled = true;
-      button.textContent = "Submitting report...";
-    });
-  }
 })();

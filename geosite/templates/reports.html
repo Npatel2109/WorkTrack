@@ -3,6 +3,16 @@
 {% block content %}
 <div class="page-heading"><div><p class="eyebrow">{{ "REPORTING" if current_user.is_admin else "MY HISTORY" }}</p><h1>{{ "Site reports" if current_user.is_admin else "My reports" }}</h1><p class="text-secondary mb-0">Review completed visits and download reports.</p></div>{% if current_user.is_admin %}<a class="btn btn-primary" href="{{ url_for('main.export_excel') }}">Export Excel</a>{% endif %}</div>
 <section class="panel-card">
+  <form id="activity-export" class="row g-3 align-items-end mb-4" method="get" action="{{ url_for('main.download_activity_excel') }}">
+    <div class="col-12"><p class="eyebrow mb-1">SITE ACTIVITY EXCEL</p><p class="small text-secondary mb-0">Sample report layout with daily rows, leave reasons and billable-day totals. Each billable visit counts as 1 day. Approved employee leave is included for the selected site.</p></div>
+    {% if current_user.is_admin %}
+    <div class="col-md-4"><label class="form-label" for="activity-employee">Employee</label><select class="form-select" id="activity-employee" name="employee_id" required><option value="">Select employee</option>{% for employee in activity_employees %}<option value="{{ employee.id }}">{{ employee.name }} - {{ employee.email }}{{ ' (inactive)' if not employee.is_active else '' }}</option>{% endfor %}</select></div>
+    {% endif %}
+    <div class="col-md-4"><label class="form-label" for="activity-site">Site</label><select class="form-select" id="activity-site" name="site_id" required><option value="">Select site</option>{% for site in activity_sites %}<option value="{{ site.id }}" data-employee-id="{{ site.employee_id }}">{{ site.site_name }} - {{ site.employee.name }}{{ ' (archived)' if not site.is_active else '' }}</option>{% endfor %}</select></div>
+    <div class="col-md-3"><label class="form-label" for="activity-start">From date</label><input class="form-control" id="activity-start" type="date" name="start_date" required></div>
+    <div class="col-md-3"><label class="form-label" for="activity-end">To date</label><input class="form-control" id="activity-end" type="date" name="end_date" required></div>
+    <div class="col-md-2"><button class="btn btn-primary w-100">Download Excel</button></div>
+  </form>
   <div class="row g-3 align-items-end mb-4">
     <div class="col-lg"><p class="eyebrow mb-1">COMBINED PDF DOWNLOAD</p><div class="small text-secondary">Choose dates to combine matching reports into one PDF.</div></div>
     <div class="col-md-3"><label class="form-label" for="start-date">From date</label><input class="form-control" id="start-date" type="date" required></div>
@@ -12,7 +22,7 @@
   <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Engineer</th><th>Customer / site</th><th>Check-in</th><th>Check-out</th><th>Selfie</th><th>Report</th></tr></thead>
     <tbody>{% for item in reports %}<tr>
       <td><div class="fw-semibold">{{ item.employee.name }}</div><div class="small text-secondary">{{ item.employee.email }}</div></td>
-      <td>{{ item.site.customer_name }}<div class="small text-secondary">{{ item.site.site_name }}</div></td>
+      <td>{{ item.site.customer_name }}<div class="small text-secondary">{{ item.site.site_name }}</div><span class="small">{{ ('Billable' if item.report.is_billable else 'Non-billable') if item.report and item.report.is_billable is not none else 'Billing not recorded' }}</span></td>
       <td>{{ item.checkin_time.strftime("%d %b %Y · %H:%M") }}</td><td>{{ item.checkout_time.strftime("%d %b %Y · %H:%M") if item.checkout_time else "—" }}</td>
       <td><a href="{{ url_for('main.media', filename=item.checkin_selfie) }}" target="_blank" rel="noopener noreferrer">View selfie</a></td><td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.download_pdf', attendance_id=item.id) }}">Download PDF</a></td>
     </tr>{% else %}<tr><td colspan="6" class="empty-state">No completed reports yet.</td></tr>{% endfor %}</tbody>
@@ -21,6 +31,21 @@
 {% endblock %}
 {% block scripts %}
 <script>
+{% if current_user.is_admin %}
+const activityEmployee = document.getElementById("activity-employee");
+const activitySite = document.getElementById("activity-site");
+const filterActivitySites = () => {
+  for (const option of activitySite.options) {
+    if (!option.value) continue;
+    option.hidden = option.dataset.employeeId !== activityEmployee.value;
+    option.disabled = option.hidden;
+  }
+  if (activitySite.selectedOptions[0]?.disabled) activitySite.value = "";
+  activitySite.disabled = !activityEmployee.value;
+};
+activityEmployee.addEventListener("change", filterActivitySites);
+filterActivitySites();
+{% endif %}
 document.getElementById("download-combined-pdf").addEventListener("click", () => {
   const start = document.getElementById("start-date");
   const end = document.getElementById("end-date");

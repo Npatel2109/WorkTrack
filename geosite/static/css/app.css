@@ -44,6 +44,10 @@ a:hover { color: #214dc7; }
 .status-pill.assigned { background: #fff0df; color: #bd6b17; }
 .status-pill.offline { background: #fee8e8; color: #c14343; }
 .status-pill.completed { background: #e5efff; color: #3568cc; }
+.status-pill.on-leave { background: #f4edff; color: #8752ca; }
+.status-pill.pending { background: #fff0df; color: #bd6b17; }
+.status-pill.approved { background: #e2f6ec; color: #168453; }
+.status-pill.rejected { background: #fee8e8; color: #c14343; }
 .status-pill i, .live-dot-label i { width: 7px; height: 7px; background: currentColor; border-radius: 50%; }
 .live-dot-label { display: inline-flex; gap: 7px; align-items: center; color: var(--muted); font-size: .72rem; }
 .live-dot-label i { color: #1eae6c; }

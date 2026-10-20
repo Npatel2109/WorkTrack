@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}{{ "Employee leave" if current_user.is_admin else "My leave" }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">LEAVE MANAGEMENT</p><h1>{{ "Employee leave" if current_user.is_admin else "My leave" }}</h1><p class="text-secondary mb-0">{{ "Review employee leave applications." if current_user.is_admin else "Apply for leave and track administrator approval." }}</p></div></div>
+{% if not current_user.is_admin %}
+<section class="panel-card mb-4">
+  <div class="section-title"><h2>Apply for leave</h2></div>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row g-3">
+      <div class="col-md-4"><label class="form-label" for="leave-start">Start date</label><input class="form-control" id="leave-start" name="start_date" type="date" min="{{ today }}" value="{{ request.form.get('start_date', '') }}" required></div>
+      <div class="col-md-4"><label class="form-label" for="leave-end">End date</label><input class="form-control" id="leave-end" name="end_date" type="date" min="{{ today }}" value="{{ request.form.get('end_date', '') }}" required></div>
+      <div class="col-md-4"><label class="form-label" for="leave-period">Duration</label><select class="form-select" id="leave-period" name="period" required>
+        {% for value, label in [('full', 'Full day(s)'), ('morning', 'Half day - morning'), ('afternoon', 'Half day - afternoon')] %}<option value="{{ value }}" {% if request.form.get('period', 'full') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select></div>
+      <div class="col-12"><label class="form-label" for="leave-reason">Reason</label><textarea class="form-control" id="leave-reason" name="reason" maxlength="2000" rows="3" required>{{ request.form.get('reason', '') }}</textarea></div>
+      <div class="col-12"><p class="form-text">Half-day requests must use the same start and end date. Full-day ranges include weekends. Dates use UTC, like attendance. Leave requires approval and does not block site visits.</p><button class="btn btn-primary">Submit leave request</button></div>
+    </div>
+  </form>
+</section>
+{% else %}
+<nav class="d-flex flex-wrap gap-2 mb-4" aria-label="Filter leave requests">
+  {% for value, label in [('all', 'All requests'), ('pending', 'Pending'), ('approved', 'Approved'), ('rejected', 'Rejected'), ('today', 'On leave today')] %}
+  <a class="btn btn-sm {{ 'btn-primary' if selected_status == value else 'btn-outline-primary' }}" href="{{ url_for('main.admin_leaves', status=value, from_date=from_date, to_date=to_date, employee_search=employee_search, employee_id=employee_id) }}">{{ label }}</a>
+  {% endfor %}
+</nav>
+{% endif %}
+<section class="panel-card mb-4">
+  <div class="section-title"><h2>Leave totals by date</h2></div>
+  <form method="get" class="row g-3">
+    {% if current_user.is_admin %}<input type="hidden" name="status" value="{{ selected_status }}">{% endif %}
+    <div class="col-md-3"><label class="form-label" for="filter-from">From date</label><input class="form-control" id="filter-from" name="from_date" type="date" value="{{ from_date }}"></div>
+    <div class="col-md-3"><label class="form-label" for="filter-to">To date</label><input class="form-control" id="filter-to" name="to_date" type="date" value="{{ to_date }}"></div>
+    {% if current_user.is_admin %}
+    <div class="col-md-3"><label class="form-label" for="employee-search">Search employee name or email</label><input class="form-control" id="employee-search" name="employee_search" type="search" value="{{ employee_search }}" placeholder="Type to find an employee"></div>
+    <div class="col-md-3"><label class="form-label" for="filter-employee">Employee</label><select class="form-select" id="filter-employee" name="employee_id"><option value="">All matching employees</option>
+      {% for employee in employee_options %}<option value="{{ employee.id }}" {% if employee_id == employee.id|string %}selected{% endif %}>{{ employee.name }} - {{ employee.email }}{{ " (inactive)" if not employee.is_active else "" }}</option>{% endfor %}
+    </select></div>
+    {% endif %}
+    <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Apply filters</button><a class="btn btn-outline-secondary" href="{{ url_for('main.admin_leaves' if current_user.is_admin else 'main.employee_leaves') }}">Reset filters</a></div>
+  </form>
+  <div class="mt-4"><span class="stat-label">Total leaves taken (days)</span><div class="stat-value" id="leave-total">{{ "%g"|format(leave_total) }}</div></div>
+  <p class="form-text">Approved leave only, through today (UTC). Half days count as 0.5. Only days inside the selected range count, including weekends. Blank dates mean no date limit. Future, pending and rejected leave do not count. Status tabs filter the request list, not these totals.</p>
+  {% if current_user.is_admin %}
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Employee</th><th>Leaves taken (days)</th></tr></thead><tbody>
+    {% for employee, total in employee_totals %}<tr><td>{{ employee.name }}<div class="small text-secondary">{{ employee.email }}</div></td><td>{{ "%g"|format(total) }}</td></tr>
+    {% else %}<tr><td colspan="2" class="empty-state">No employees match these filters.</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% endif %}
+</section>
+<section class="panel-card">
+  <div class="section-title"><h2>{{ "Leave requests" if current_user.is_admin else "My requests" }}</h2></div>
+  {% if selected_status == 'today' %}<p class="small text-secondary">Approved leave covering today (UTC), including morning and afternoon half days. Each employee is counted once on the dashboard.</p>{% endif %}
+  <div class="table-responsive"><table class="table align-middle">
+    <thead><tr>{% if current_user.is_admin %}<th>Employee</th>{% endif %}<th>Dates</th><th>Duration</th><th>Reason</th><th>Status</th><th>Review</th></tr></thead>
+    <tbody>{% for leave in leaves %}<tr>
+      {% if current_user.is_admin %}<td><div class="fw-semibold">{{ leave.employee.name }}</div><div class="small text-secondary">{{ leave.employee.email }}</div></td>{% endif %}
+      <td class="text-nowrap">{{ leave.start_date.strftime("%d %b %Y") }}<br>to {{ leave.end_date.strftime("%d %b %Y") }}</td>
+      <td>{{ leave.period_label }}<div class="small text-secondary">{{ leave.days }} day(s)</div></td>
+      <td style="min-width: 180px; white-space: pre-wrap; overflow-wrap: anywhere;">{{ leave.reason }}</td>
+      <td><span class="status-pill {{ leave.status }}">{{ leave.status|title }}</span></td>
+      <td>{% if current_user.is_admin and leave.status == 'pending' %}
+        <form method="post" action="{{ url_for('main.review_leave', leave_id=leave.id) }}" class="d-flex gap-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-sm btn-success" name="decision" value="approved">Approve</button>
+          <button class="btn btn-sm btn-outline-danger" name="decision" value="rejected">Reject</button>
+        </form>
+      {% elif leave.reviewed_by %}<span class="small">{{ leave.reviewed_by.name }}<br>{{ leave.reviewed_at.strftime("%d %b %Y %H:%M UTC") }}</span>
+      {% else %}<span class="text-secondary">Awaiting review</span>{% endif %}</td>
+    </tr>{% else %}<tr><td colspan="{{ 7 if current_user.is_admin else 6 }}" class="empty-state">No leave requests found.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}
+{% block scripts %}
+{% if current_user.is_admin %}
+<script>
+  const employeeSearch = document.getElementById("employee-search");
+  const employeeSelect = document.getElementById("filter-employee");
+  const filterEmployees = () => {
+    const search = employeeSearch.value.trim().toLowerCase();
+    for (const option of employeeSelect.options) {
+      option.hidden = Boolean(option.value) && !option.textContent.toLowerCase().includes(search);
+    }
+    if (employeeSelect.selectedOptions[0]?.hidden) employeeSelect.value = "";
+  };
+  employeeSearch.addEventListener("input", filterEmployees);
+  filterEmployees();
+</script>
+{% endif %}
+{% endblock %}

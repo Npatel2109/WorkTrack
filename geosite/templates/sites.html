@@ -9,6 +9,10 @@
       <label class="form-label">Employee</label><select class="form-select mb-3" name="employee_id" required><option value="">Select employee</option>{% for employee in employees %}<option value="{{ employee.id }}">{{ employee.name }}</option>{% endfor %}</select>
       <label class="form-label">Site name</label><input class="form-control mb-3" name="site_name" maxlength="160" required>
       <label class="form-label">Customer name</label><input class="form-control mb-3" name="customer_name" maxlength="160" required>
+      <label class="form-label">Project (report header)</label><input class="form-control mb-3" name="project_name" maxlength="250">
+      <label class="form-label">PO number</label><input class="form-control mb-3" name="po_number" maxlength="120">
+      <label class="form-label">PO date</label><input class="form-control mb-3" name="po_date" type="date">
+      {% set header_site = none %}{% include "_report_signoff_fields.html" %}
       <label class="form-label" for="site-address">Address</label><textarea class="form-control" id="site-address" name="address" rows="2" required></textarea>
       <div class="d-flex align-items-center gap-2 mt-2 mb-2"><button class="btn btn-sm btn-outline-primary" id="find-site-address" type="button">Find address on map</button><span class="small text-secondary" id="site-map-status">Search the address or click/drag a map pin.</span></div>
       <div id="site-location-map" class="map-canvas site-location-map mb-3" aria-label="Choose site coordinates"></div>
@@ -26,6 +30,14 @@
       <div class="col-md-6"><article class="site-card">
         <div class="d-flex justify-content-between gap-2"><div><span class="eyebrow">{{ site.customer_name }}</span><h3>{{ site.site_name }}</h3></div><span class="status-pill assigned">{{ site.allowed_radius|int }} m</span></div>
         <p class="text-secondary small">{{ site.address }}</p><p class="small mb-3"><strong>Engineer:</strong> {{ site.employee.name }}<br><span class="text-secondary">{{ "%.5f"|format(site.latitude) }}, {{ "%.5f"|format(site.longitude) }}</span></p>
+        <form class="mb-3" method="post" action="{{ url_for('main.site_report_details', site_id=site.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label class="form-label" for="project-{{ site.id }}">Project</label><input class="form-control mb-2" id="project-{{ site.id }}" name="project_name" maxlength="250" value="{{ site.project_name }}">
+          <label class="form-label" for="po-{{ site.id }}">PO number</label><input class="form-control mb-2" id="po-{{ site.id }}" name="po_number" maxlength="120" value="{{ site.po_number }}">
+          <label class="form-label" for="po-date-{{ site.id }}">PO date</label><input class="form-control mb-2" id="po-date-{{ site.id }}" name="po_date" type="date" value="{{ site.po_date or '' }}">
+          {% set header_site = site %}{% include "_report_signoff_fields.html" %}
+          <button class="btn btn-sm btn-outline-primary">Save report header</button>
+        </form>
         <div class="d-flex gap-2"><a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps/dir/?api=1&amp;destination={{ site.latitude }},{{ site.longitude }}">Navigate</a>
           <form method="post" action="{{ url_for('main.delete_site', site_id=site.id) }}" onsubmit="return confirm('Remove this site assignment?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger">Remove</button></form>
         </div>

@@ -7,8 +7,9 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlsplit
+import ipaddress
 
-import pandas as pd
 from email_validator import EmailNotValidError, validate_email
 from flask import (
     Blueprint,
@@ -28,7 +29,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func
 
 from .extensions import db
-from .models import AssignedSite, Attendance, AuditLog, Invoice, SiteReport, User, utcnow
+from .models import AppSettings, AssignedSite, Attendance, AuditLog, Invoice, LeaveRequest, SiteReport, User, utcnow
 from .services import (
     generate_invoice_pdf,
     generate_site_report_pdf,
@@ -161,8 +162,27 @@ def _reset_serializer():
     )
 
 
+def _leaves_today(today):
+    return LeaveRequest.query.join(LeaveRequest.employee).filter(
+        LeaveRequest.status == "approved",
+        LeaveRequest.start_date <= today,
+        LeaveRequest.end_date >= today,
+        User.is_active.is_(True),
+    )
+
+
+def _leave_counts(today):
+    return {
+        "pending_leave_count": LeaveRequest.query.filter_by(status="pending").count(),
+        "on_leave_count": _leaves_today(today).with_entities(
+            LeaveRequest.employee_id
+        ).distinct().count(),
+    }
+
+
 def _live_rows(today):
     rows = []
+    on_leave = {leave.employee_id for leave in _leaves_today(today)}
     employees = User.query.filter_by(role="employee").order_by(User.name).all()
     for employee in employees:
         active = (
@@ -193,6 +213,8 @@ def _live_rows(today):
         status = (
             "onsite"
             if active
+            else "on-leave"
+            if employee.id in on_leave
             else "completed"
             if completed_today
             else "assigned"
@@ -245,7 +267,115 @@ def login():
         flash("Email or password is incorrect.", "danger")
     if request.args.get("expired"):
         flash("Your session expired. Please sign in again.", "warning")
-    return render_template("login.html")
+    settings = db.session.get(AppSettings, 1)
+    android_url = settings.android_server_url if settings else ""
+    return render_template(
+        "login.html", android_server_url=android_url,
+        android_available=bool(android_url) and Path(current_app.config["ANDROID_APK_PATH"]).is_file(),
+    )
+
+
+@bp.route("/admin/settings", methods=["GET", "POST"])
+@admin_required
+def app_settings():
+    settings = db.session.get(AppSettings, 1)
+    if request.method == "POST":
+        server_url = request.form.get("android_server_url", "").strip().rstrip("/")
+        try:
+            if server_url:
+                parsed = urlsplit(server_url)
+                if (
+                    len(server_url) > 500 or parsed.scheme not in ("https", "http")
+                    or not parsed.hostname or parsed.username or parsed.password
+                    or parsed.query or parsed.fragment or parsed.path not in ("", "/")
+                    or any(character.isspace() for character in server_url)
+                    or "\\" in server_url or parsed.hostname.endswith(".localhost")
+                    or parsed.hostname in ("localhost", "localhost.localdomain")
+                ):
+                    raise ValueError
+                if parsed.port is not None and not 1 <= parsed.port <= 65535:
+                    raise ValueError
+                try:
+                    address = ipaddress.ip_address(parsed.hostname)
+                except ValueError:
+                    if "." not in parsed.hostname or parsed.scheme != "https":
+                        raise ValueError("Public hostnames require HTTPS.")
+                else:
+                    local_network = any(address in network for network in (
+                        ipaddress.ip_network("10.0.0.0/8"),
+                        ipaddress.ip_network("172.16.0.0/12"),
+                        ipaddress.ip_network("192.168.0.0/16"),
+                    )) if address.version == 4 else False
+                    if not address.is_global and not local_network:
+                        raise ValueError
+                    if parsed.scheme == "http" and not local_network:
+                        raise ValueError
+        except ValueError:
+            flash("Enter an HTTPS domain or a private-network HTTP address, such as http://192.168.1.6:5000, without a path, credentials or query. Leave blank to hide the download.", "danger")
+        else:
+            if settings is None:
+                settings = AppSettings(id=1)
+                db.session.add(settings)
+            settings.android_server_url = server_url
+            write_audit(current_user, "android_settings_updated", server_url or "Download disabled")
+            db.session.commit()
+            flash("Android app settings saved.", "success")
+            return redirect(url_for("main.app_settings"))
+    return render_template(
+        "settings.html", settings=settings,
+        apk_ready=Path(current_app.config["ANDROID_APK_PATH"]).is_file(),
+        tunnel=current_app.extensions["quick_tunnel"].snapshot(),
+    )
+
+
+@bp.route("/admin/settings/tunnel", methods=["POST"])
+@admin_required
+def manage_tunnel():
+    tunnel = current_app.extensions["quick_tunnel"]
+    action = request.form.get("action")
+    if action == "start":
+        if request.form.get("confirm_public") != "yes":
+            flash("Confirm that you want to make this app publicly reachable before creating a link.", "danger")
+        elif current_app.debug:
+            flash("Stop the debug server and restart without --debug before creating a public link.", "danger")
+        else:
+            try:
+                tunnel.start()
+            except RuntimeError as error:
+                flash(str(error), "danger")
+            else:
+                write_audit(current_user, "public_tunnel_started", "Temporary public link requested")
+                db.session.commit()
+                flash("Creating the link. Refresh tunnel status in a few seconds.", "success")
+    elif action == "stop":
+        tunnel.stop()
+        write_audit(current_user, "public_tunnel_stopped")
+        db.session.commit()
+        flash("Temporary public access stopped. Any saved Android address is unchanged; replace it if needed.", "success")
+    else:
+        abort(400)
+    return redirect(url_for("main.app_settings"))
+
+
+@bp.route("/admin/settings/tunnel/status")
+@admin_required
+def tunnel_status():
+    return jsonify(current_app.extensions["quick_tunnel"].snapshot())
+
+
+@bp.route("/download/android")
+def download_android():
+    settings = db.session.get(AppSettings, 1)
+    path = Path(current_app.config["ANDROID_APK_PATH"])
+    if not settings or not settings.android_server_url or not path.is_file():
+        abort(404)
+    response = send_file(
+        path, mimetype="application/vnd.android.package-archive",
+        as_attachment=True, download_name="WorkTrack.apk", max_age=0,
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @bp.route("/forgot-password", methods=["GET", "POST"])
@@ -346,6 +476,7 @@ def admin_dashboard():
         live_rows=rows,
         chart_labels=labels,
         chart_values=[counts.get(day, 0) for day in labels],
+        **_leave_counts(today),
     )
 
 
@@ -426,8 +557,10 @@ def admin_metric(metric):
 @bp.route("/api/admin/live-status")
 @admin_required
 def live_status():
-    rows = _live_rows(datetime.now(timezone.utc).date())
+    today = utcnow().date()
+    rows = _live_rows(today)
     return jsonify(
+        **_leave_counts(today),
         onsite_count=sum(row["status"] == "onsite" for row in rows),
         employees=[
             {
@@ -527,6 +660,7 @@ def delete_employee(user_id):
     has_history = (
         Attendance.query.filter_by(employee_id=user_id).first()
         or Invoice.query.filter_by(employee_id=user_id).first()
+        or LeaveRequest.query.filter_by(employee_id=user_id).first()
         or AuditLog.query.filter_by(user_id=user_id).first()
     )
     if has_history:
@@ -557,6 +691,13 @@ def sites():
                 request.form.get(key, "").strip()
                 for key in ("site_name", "customer_name", "address")
             ]
+            project_name = request.form.get("project_name", "").strip()
+            po_number = request.form.get("po_number", "").strip()
+            po_raw = request.form.get("po_date", "").strip()
+            po_date = date.fromisoformat(po_raw) if po_raw else None
+            if len(project_name) > 250 or len(po_number) > 120:
+                raise ValueError
+            signoff = _report_signoff_fields()
             if not employee or not all(details):
                 raise ValueError
             if not (
@@ -566,7 +707,7 @@ def sites():
             ):
                 raise ValueError
         except (TypeError, ValueError):
-            flash("Enter valid site details, coordinates, radius, and employee.", "danger")
+            flash("Enter valid site details, coordinates, radius, employee and PO date. Keep company/manager fields within their limits and remarks to five lines (2,000 characters).", "danger")
         else:
             existing = AssignedSite.query.filter_by(
                 employee_id=employee_id, is_active=True
@@ -598,6 +739,9 @@ def sites():
                     allowed_radius=radius,
                 )
                 db.session.add(site)
+            site.project_name, site.po_number, site.po_date = project_name, po_number, po_date
+            for key, value in signoff.items():
+                setattr(site, key, value)
             write_audit(current_user, "site_assigned", f"{site.site_name} -> {employee.email}")
             db.session.commit()
             flash("Site assignment saved.", "success")
@@ -605,6 +749,46 @@ def sites():
     active_sites = AssignedSite.query.filter_by(is_active=True).order_by(AssignedSite.site_name).all()
     employee_options = User.query.filter_by(role="employee", is_active=True).order_by(User.name).all()
     return render_template("sites.html", sites=active_sites, employees=employee_options)
+
+
+def _report_signoff_fields():
+    fields = {
+        key: request.form.get(key, "").strip()
+        for key in ("report_company", "commissioning_manager", "project_manager", "report_remarks")
+    }
+    if (
+        len(fields["report_company"]) > 160
+        or len(fields["commissioning_manager"]) > 120
+        or len(fields["project_manager"]) > 120
+        or len(fields["report_remarks"]) > 2000
+        or len(fields["report_remarks"].splitlines()) > 5
+    ):
+        raise ValueError("Enter company/manager details within the field limits and at most five remarks lines (2,000 characters).")
+    return fields
+
+
+@bp.route("/admin/sites/<int:site_id>/report-details", methods=["POST"])
+@admin_required
+def site_report_details(site_id):
+    site = db.get_or_404(AssignedSite, site_id)
+    project = request.form.get("project_name", "").strip()
+    po = request.form.get("po_number", "").strip()
+    try:
+        raw = request.form.get("po_date", "").strip()
+        po_date = date.fromisoformat(raw) if raw else None
+        if len(project) > 250 or len(po) > 120:
+            raise ValueError
+        signoff = _report_signoff_fields()
+    except ValueError:
+        flash("Enter a valid PO date, project (max 250 characters), PO number (max 120), company (max 160), manager names (max 120) and at most five remarks lines (max 2,000 characters).", "danger")
+    else:
+        site.project_name, site.po_number, site.po_date = project, po, po_date
+        for key, value in signoff.items():
+            setattr(site, key, value)
+        write_audit(current_user, "site_report_header_updated", f"Site {site.id}")
+        db.session.commit()
+        flash("Report header saved.", "success")
+    return redirect(url_for("main.sites"))
 
 
 @bp.route("/admin/sites/<int:site_id>/delete", methods=["POST"])
@@ -642,7 +826,153 @@ def employee_dashboard():
         sites=AssignedSite.query.filter_by(employee_id=current_user.id, is_active=True).all(),
         active_attendance=_active_attendance(),
         reports=reports,
+        leave_requests=LeaveRequest.query.filter_by(employee_id=current_user.id)
+        .order_by(LeaveRequest.created_at.desc()).limit(5).all(),
     )
+
+
+def _render_leaves(today, selected_status="all"):
+    start_raw = request.args.get("from_date", "").strip()
+    end_raw = request.args.get("to_date", "").strip()
+    try:
+        start = date.fromisoformat(start_raw) if start_raw else None
+        end = date.fromisoformat(end_raw) if end_raw else None
+    except ValueError:
+        abort(400, description="Enter valid leave filter dates in YYYY-MM-DD format.")
+    if start and end and end < start:
+        abort(400, description="The filter end date must be on or after the start date.")
+
+    employees = []
+    employee_search = ""
+    employee_id = ""
+    query = LeaveRequest.query
+    if current_user.is_admin:
+        employee_search = request.args.get("employee_search", "").strip()
+        employee_id = request.args.get("employee_id", "").strip()
+        employee_query = User.query.filter_by(role="employee")
+        if employee_search:
+            term = employee_search.lower()
+            employee_query = employee_query.filter(
+                func.lower(User.name).contains(term, autoescape=True)
+                | func.lower(User.email).contains(term, autoescape=True)
+            )
+        employees = employee_query.order_by(User.name, User.id).all()
+        if employee_id:
+            try:
+                identifier = int(employee_id)
+            except ValueError:
+                abort(400, description="Select a valid employee.")
+            selected = User.query.filter_by(id=identifier, role="employee").first()
+            if not selected:
+                abort(400, description="Select a valid employee.")
+            employees = [employee for employee in employees if employee.id == identifier]
+        query = query.filter(LeaveRequest.employee_id.in_([employee.id for employee in employees]))
+    else:
+        query = query.filter_by(employee_id=current_user.id)
+    if start:
+        query = query.filter(LeaveRequest.end_date >= start)
+    if end:
+        query = query.filter(LeaveRequest.start_date <= end)
+
+    totals = {}
+    for leave in query.filter_by(status="approved").all():
+        overlap_start = max(leave.start_date, start) if start else leave.start_date
+        overlap_end = min(leave.end_date, end or today, today)
+        if overlap_start <= overlap_end:
+            days = (overlap_end - overlap_start).days + 1 if leave.period == "full" else 0.5
+            totals[leave.employee_id] = totals.get(leave.employee_id, 0) + days
+
+    if selected_status == "today":
+        query = query.filter(
+            LeaveRequest.status == "approved",
+            LeaveRequest.start_date <= today, LeaveRequest.end_date >= today,
+            LeaveRequest.employee.has(User.is_active.is_(True)),
+        )
+    elif selected_status in ("pending", "approved", "rejected"):
+        query = query.filter_by(status=selected_status)
+    elif selected_status != "all":
+        abort(400)
+    return render_template(
+        "leaves.html", today=today, selected_status=selected_status,
+        leaves=query.order_by(LeaveRequest.created_at.desc()).all(),
+        from_date=start_raw, to_date=end_raw, employee_search=employee_search,
+        employee_id=employee_id, employee_options=User.query.filter_by(role="employee")
+        .order_by(User.name, User.id).all() if current_user.is_admin else [],
+        leave_total=sum(totals.values()),
+        employee_totals=[(employee, totals.get(employee.id, 0)) for employee in employees],
+    )
+
+
+@bp.route("/employee/leaves", methods=["GET", "POST"])
+@employee_required
+def employee_leaves():
+    today = utcnow().date()
+    if request.method == "POST":
+        period = request.form.get("period", "")
+        reason = request.form.get("reason", "").strip()
+        try:
+            start = date.fromisoformat(request.form.get("start_date", ""))
+            end = date.fromisoformat(request.form.get("end_date", ""))
+            if start < today or end < start:
+                raise ValueError("Choose dates from today onwards, with the end on or after the start.")
+            if period not in ("full", "morning", "afternoon"):
+                raise ValueError("Choose full-day leave or a morning/afternoon half day.")
+            if period != "full" and start != end:
+                raise ValueError("Half-day leave must start and end on the same date.")
+            if not reason or len(reason) > 2000:
+                raise ValueError("Enter a leave reason of 1 to 2,000 characters.")
+        except ValueError as error:
+            flash(f"Invalid leave request. {error}", "danger")
+        else:
+            overlaps = LeaveRequest.query.filter(
+                LeaveRequest.employee_id == current_user.id,
+                LeaveRequest.status.in_(("pending", "approved")),
+                LeaveRequest.start_date <= end,
+                LeaveRequest.end_date >= start,
+            )
+            if period != "full":
+                overlaps = overlaps.filter(LeaveRequest.period.in_(("full", period)))
+            if overlaps.first():
+                flash("These dates overlap an existing pending or approved leave request.", "danger")
+            else:
+                leave = LeaveRequest(
+                    employee_id=current_user.id, start_date=start, end_date=end,
+                    period=period, reason=reason,
+                )
+                db.session.add(leave)
+                write_audit(current_user, "leave_requested", f"{start} to {end} ({period})")
+                db.session.commit()
+                flash("Leave request submitted for administrator approval.", "success")
+                return redirect(url_for("main.employee_leaves"))
+    return _render_leaves(today)
+
+
+@bp.route("/admin/leaves")
+@admin_required
+def admin_leaves():
+    return _render_leaves(utcnow().date(), request.args.get("status", "all"))
+
+
+@bp.route("/admin/leaves/<int:leave_id>/review", methods=["POST"])
+@admin_required
+def review_leave(leave_id):
+    leave = db.get_or_404(LeaveRequest, leave_id)
+    decision = request.form.get("decision")
+    if decision not in ("approved", "rejected"):
+        abort(400)
+    if decision == "approved" and (not leave.employee.is_active or leave.end_date < utcnow().date()):
+        flash("Expired requests and requests from inactive employees cannot be approved.", "danger")
+    else:
+        updated = LeaveRequest.query.filter_by(id=leave_id, status="pending").update({
+            "status": decision, "reviewed_by_id": current_user.id, "reviewed_at": utcnow(),
+        })
+        if updated:
+            write_audit(current_user, f"leave_{decision}", f"Leave request {leave_id}")
+            db.session.commit()
+            flash(f"Leave request {decision}.", "success")
+        else:
+            flash("This leave request has already been reviewed.", "warning")
+    return redirect(url_for("main.admin_leaves"))
 
 
 @bp.route("/visit/start/<int:site_id>", methods=["POST"])
@@ -812,31 +1142,10 @@ def site_report_form(attendance_id):
     ):
         abort(403)
     if request.method == "POST":
-        names = (
-            "work_performed",
-            "activities_completed",
-            "issues_found",
-            "recommendations",
-            "materials_used",
-            "remarks",
-            "engineer_name",
-            "customer_representative_name",
-        )
+        names = ("activity_detail", "billing", "engineer_name")
         values = {name: request.form.get(name, "").strip() for name in names}
-        if not all(values.values()):
-            flash("Complete every required report field.", "danger")
-            return render_template("site_report.html", attendance=attendance, values=values)
-        try:
-            employee_signature = save_data_image(
-                request.form.get("employee_signature", ""),
-                current_app.config["UPLOAD_FOLDER"],
-            )
-            customer_signature = save_data_image(
-                request.form.get("customer_signature", ""),
-                current_app.config["UPLOAD_FOLDER"],
-            )
-        except ValueError as error:
-            flash(str(error), "danger")
+        if not all(values.values()) or values["billing"] not in ("billable", "non_billable"):
+            flash("Enter activity detail, select Billable or Non-billable, and enter the engineer name.", "danger")
             return render_template("site_report.html", attendance=attendance, values=values)
         attendance.checkout_lat = verification["latitude"]
         attendance.checkout_lon = verification["longitude"]
@@ -845,9 +1154,14 @@ def site_report_form(attendance_id):
         db.session.add(
             SiteReport(
                 attendance=attendance,
-                **values,
-                employee_signature=employee_signature,
-                customer_signature=customer_signature,
+                work_performed=values["activity_detail"],
+                is_billable=values["billing"] == "billable",
+                activities_completed="", issues_found="", recommendations="",
+                materials_used="", remarks="",
+                engineer_name=values["engineer_name"],
+                customer_representative_name="",
+                employee_signature="",
+                customer_signature="",
             )
         )
         write_audit(current_user, "site_checkout", f"Attendance {attendance.id}")
@@ -865,7 +1179,56 @@ def reports():
     if not current_user.is_admin:
         query = query.filter_by(employee_id=current_user.id)
     records = query.order_by(Attendance.checkout_time.desc()).all()
-    return render_template("reports.html", reports=records)
+    sites_query = AssignedSite.query
+    if not current_user.is_admin:
+        sites_query = sites_query.filter_by(employee_id=current_user.id)
+    return render_template(
+        "reports.html", reports=records,
+        activity_sites=sites_query.order_by(AssignedSite.site_name).all(),
+        activity_employees=User.query.filter_by(role="employee").order_by(User.name).all()
+        if current_user.is_admin else [],
+    )
+
+
+@bp.route("/reports/activity.xlsx")
+@login_required
+def download_activity_excel():
+    try:
+        start = date.fromisoformat(request.args.get("start_date", ""))
+        end = date.fromisoformat(request.args.get("end_date", ""))
+        site_id = int(request.args.get("site_id", ""))
+        if end < start or (end - start).days > 366:
+            raise ValueError
+    except ValueError:
+        flash("Select a site and valid start/end dates covering at most 367 days.", "danger")
+        return redirect(url_for("main.reports"))
+    query = AssignedSite.query.filter_by(id=site_id)
+    if current_user.is_admin:
+        try:
+            employee_id = int(request.args.get("employee_id", ""))
+        except ValueError:
+            flash("Select an employee for the Excel report.", "danger")
+            return redirect(url_for("main.reports", _anchor="activity-export"))
+        query = query.filter_by(employee_id=employee_id)
+    else:
+        query = query.filter_by(employee_id=current_user.id)
+    site = query.first_or_404()
+    visits = _date_filtered(
+        Attendance.query.filter_by(site_id=site.id, status="completed")
+        .filter(Attendance.report.has()), start, end
+    ).order_by(Attendance.checkout_time, Attendance.id).all()
+    leaves = LeaveRequest.query.filter(
+        LeaveRequest.employee_id == site.employee_id,
+        LeaveRequest.status == "approved", LeaveRequest.start_date <= end,
+        LeaveRequest.end_date >= start,
+    ).order_by(LeaveRequest.id).all()
+    from .activity_report import activity_workbook
+
+    output = activity_workbook(site, visits, leaves, start, end)
+    return send_file(
+        output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True, download_name=f"site-activity-{site.id}-{start}-{end}.xlsx",
+    )
 
 
 @bp.route("/reports/combined.pdf")
@@ -1002,47 +1365,9 @@ def download_invoice(invoice_id):
 @bp.route("/admin/reports/export.xlsx")
 @admin_required
 def export_excel():
-    records = Attendance.query.filter_by(status="completed").order_by(Attendance.checkout_time.desc()).all()
-    rows = []
-    for item in records:
-        report = item.report
-        rows.append(
-            {
-                "Employee": item.employee.name,
-                "Email": item.employee.email,
-                "Customer": item.site.customer_name,
-                "Site": item.site.site_name,
-                "Address": item.site.address,
-                "Check-in": item.checkin_time.isoformat(),
-                "Check-out": item.checkout_time.isoformat() if item.checkout_time else "",
-                "Check-in latitude": item.checkin_lat,
-                "Check-in longitude": item.checkin_lon,
-                "Check-out latitude": item.checkout_lat,
-                "Check-out longitude": item.checkout_lon,
-                "Work performed": report.work_performed if report else "",
-                "Activities completed": report.activities_completed if report else "",
-                "Issues found": report.issues_found if report else "",
-                "Recommendations": report.recommendations if report else "",
-                "Materials used": report.materials_used if report else "",
-                "Remarks": report.remarks if report else "",
-                "Engineer": report.engineer_name if report else "",
-                "Customer representative": report.customer_representative_name if report else "",
-            }
-        )
-    for row in rows:
-        for key, value in row.items():
-            if isinstance(value, str) and value.startswith(("=", "+", "-", "@", "\t", "\r")):
-                row[key] = "'" + value
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        pd.DataFrame(rows).to_excel(writer, index=False, sheet_name="Site Reports")
-    output.seek(0)
-    return send_file(
-        output,
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        as_attachment=True,
-        download_name="geosite-reports.xlsx",
-    )
+    if not request.args:
+        return redirect(url_for("main.reports", _anchor="activity-export"))
+    return download_activity_excel()
 
 
 @bp.route("/admin/attendance")

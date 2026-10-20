@@ -14,6 +14,14 @@
     <div class="stat-icon {{ tone }}">{{ icon }}</div><div class="stat-label">{{ label }}</div><div class="stat-value" {% if metric == 'onsite' %}id="onsite-stat"{% endif %}>{{ value }}</div>
   </a></div>
   {% endfor %}
+  {% for label, value, icon, tone, filter, identifier in [
+    ('Pending leave requests', pending_leave_count, '06', 'orange', 'pending', 'pending-leave-stat'),
+    ('On leave today', on_leave_count, '07', 'purple', 'today', 'on-leave-stat')
+  ] %}
+  <div class="col-6 col-xl"><a class="stat-card stat-card-link" href="{{ url_for('main.admin_leaves', status=filter) }}">
+    <div class="stat-icon {{ tone }}">{{ icon }}</div><div class="stat-label">{{ label }}</div><div class="stat-value" id="{{ identifier }}">{{ value }}</div>
+  </a></div>
+  {% endfor %}
 </div>
 <div class="row g-4">
   <div class="col-xl-8">
@@ -24,7 +32,7 @@
         <tbody id="live-status-body">{% for row in live_rows %}
           <tr><td><div class="fw-semibold">{{ row.employee.name }}</div><div class="small text-secondary">{{ row.employee.designation }}</div></td>
             <td>{{ row.site.site_name if row.site else "No site assigned" }}{% if row.site %}<div class="small text-secondary">{{ row.site.customer_name }}</div>{% endif %}</td>
-            <td>{{ row.attendance.checkin_time.strftime("%H:%M") if row.attendance else "—" }}</td><td><span class="status-pill {{ row.status }}">{{ row.status|title }}</span></td>
+            <td>{{ row.attendance.checkin_time.strftime("%H:%M") if row.attendance else "—" }}</td><td><span class="status-pill {{ row.status }}">{{ row.status|replace('-', ' ')|title }}</span></td>
           </tr>
         {% else %}<tr><td colspan="4" class="empty-state">No employees have been added yet.</td></tr>{% endfor %}</tbody>
       </table></div>
@@ -45,6 +53,7 @@
     <section class="panel-card mt-4 quick-links"><p class="eyebrow">QUICK ACTIONS</p>
       <a href="{{ url_for('main.employees') }}">Add or manage employees <span>→</span></a>
       <a href="{{ url_for('main.sites') }}">Assign a site <span>→</span></a>
+      <a href="{{ url_for('main.admin_leaves', status='pending') }}">Review leave requests <span>&rarr;</span></a>
       <a href="{{ url_for('main.reports') }}">Review site reports <span>→</span></a>
       <a href="{{ url_for('main.invoices') }}">Generate invoices <span>→</span></a>
       <a href="{{ url_for('main.attendance_history') }}">View access history <span>→</span></a>

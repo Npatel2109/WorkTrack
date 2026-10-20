@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}App settings{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">ADMINISTRATION</p><h1>App settings</h1></div></div>
+<section class="panel-card mb-4">
+  <div class="section-title"><h2>Temporary global access</h2></div>
+  <p class="text-secondary">Create a free Cloudflare HTTPS link for admins and employees. Your normal login and role permissions still apply. Keep this PC, WorkTrack and the tunnel running.</p>
+  <div class="alert alert-warning">Testing only, not permanent hosting. Anyone on the internet can reach the login page. Use strong passwords and trusted users. Traffic passes through Cloudflare. Links change on restart. Never expose Flask debug mode.</div>
+  <p id="tunnel-state" role="status" aria-live="polite">{{ "Connected" if tunnel.ready else "Starting / reconnecting" if tunnel.running else "Stopped" }}</p>
+  <a id="tunnel-link" class="text-break fw-semibold" href="{{ tunnel.url or '#' }}" target="_blank" rel="noopener noreferrer" {% if not tunnel.ready %}hidden{% endif %}>{{ tunnel.url }}</a>
+  <p class="small text-danger" id="tunnel-error">{{ tunnel.error }}</p>
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    <button class="btn btn-outline-primary" type="button" id="refresh-tunnel">Refresh tunnel status</button>
+    <button class="btn btn-outline-primary" type="button" id="use-tunnel-address" {% if not tunnel.ready %}disabled{% endif %}>Use link for Android download</button>
+  </div>
+  <form method="post" action="{{ url_for('main.manage_tunnel') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="d-block mb-3"><input type="checkbox" name="confirm_public" value="yes"> I understand this makes my app publicly reachable through Cloudflare.</label>
+    <button class="btn btn-primary" name="action" value="start">Create public link</button>
+    <button class="btn btn-outline-danger" name="action" value="stop">Stop public link</button>
+  </form>
+  <details class="mt-3"><summary>Connection diagnostics</summary><pre class="small text-break mt-2" id="tunnel-logs" style="white-space: pre-wrap;">{{ tunnel.logs|join('\n') }}</pre></details>
+  <p class="form-text">Click Refresh until connected. Copy the link to share it. To offer the APK on login, click Use link above, then Save settings below. Installed Android apps must switch their server manually. Stopping from this public page disconnects it; use your local address to reconnect.</p>
+</section>
+<section class="panel-card">
+  <div class="section-title"><h2>Android app download</h2></div>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="form-label" for="android-server-url">App address (HTTPS domain or local HTTP)</label>
+    <input class="form-control" id="android-server-url" name="android_server_url" type="url" maxlength="500" placeholder="https://worktrack.example.com" value="{{ request.form.get('android_server_url', settings.android_server_url if settings else '') }}">
+    <p class="form-text">Enter this WorkTrack server's address without a path: https://worktrack.example.com or http://192.168.1.6:5000. Local HTTP accepts private IPv4 addresses only (10.x.x.x, 172.16-31.x.x, 192.168.x.x). Users enter this address once in the Android app. Leave blank to hide the download button.</p>
+    <div class="alert alert-warning">Local HTTP is for testing on trusted Wi-Fi only. Passwords and data are unencrypted. Login, dashboards, leave and reports can be tested, but camera/GPS workflows require trusted HTTPS. The phone and PC must be on the same network.</div>
+    <p class="small text-secondary">APK: {{ "Ready" if apk_ready else "Not built or published yet. The download stays hidden until an APK is available." }}</p>
+    <p class="small text-secondary">The app requires internet access, a trusted HTTPS certificate, and camera/location permission for site visits. Changing this address does not reconfigure already installed apps; users can change their server in the app menu.</p>
+    <button class="btn btn-primary">Save settings</button>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  let tunnelUrl = {{ tunnel.url|tojson }};
+  document.getElementById("refresh-tunnel").addEventListener("click", async () => {
+    const button = document.getElementById("refresh-tunnel");
+    button.disabled = true;
+    try {
+      const response = await fetch({{ url_for('main.tunnel_status')|tojson }}, { headers: { Accept: "application/json" }, cache: "no-store" });
+      if (!response.ok || response.redirected) throw new Error("Unable to load tunnel status. Sign in as admin and retry.");
+      const data = await response.json();
+      tunnelUrl = data.url;
+      document.getElementById("tunnel-state").textContent = data.ready ? "Connected" : data.running ? "Starting / reconnecting" : "Stopped";
+      const link = document.getElementById("tunnel-link");
+      link.textContent = tunnelUrl;
+      link.href = tunnelUrl || "#";
+      link.hidden = !data.ready;
+      document.getElementById("use-tunnel-address").disabled = !data.ready;
+      document.getElementById("tunnel-error").textContent = data.error;
+      document.getElementById("tunnel-logs").textContent = data.logs.join("\n");
+    } catch (error) {
+      document.getElementById("tunnel-error").textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  document.getElementById("use-tunnel-address").addEventListener("click", () => {
+    if (tunnelUrl) {
+      document.getElementById("android-server-url").value = tunnelUrl;
+      document.getElementById("android-server-url").focus();
+    }
+  });
+</script>
+{% endblock %}

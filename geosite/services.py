@@ -179,35 +179,44 @@ def generate_site_report_pdf(attendance, output, upload_folder):
         ],
     )
     if report:
-        section(
-            "Work Performed",
-            [
+        detail_rows = [
                 ["Work Performed", safe(report.work_performed)],
                 ["Activities Completed", safe(report.activities_completed)],
                 ["Issues Found", safe(report.issues_found)],
                 ["Recommendations", safe(report.recommendations)],
                 ["Materials Used", safe(report.materials_used)],
                 ["Remarks", safe(report.remarks)],
-                ["Customer Representative", safe(report.customer_representative_name)],
-            ],
-        )
+                ["Customer Representative", safe(report.customer_representative_name) if report.customer_representative_name else "____________________________"],
+            ]
+        if report.is_billable is not None:
+            detail_rows = [
+                ["Activity Detail", safe(report.work_performed)],
+                ["Billing", "Billable (1 day)" if report.is_billable else "Non-billable (0 days)"],
+                ["Customer Representative", safe(report.customer_representative_name) if report.customer_representative_name else "____________________________"],
+            ]
+        section("Site Activity", detail_rows)
         signatures = []
         for label, filename in (
             ("Engineer Signature", report.employee_signature),
             ("Customer Signature", report.customer_signature),
         ):
             image_path = Path(upload_folder) / filename
-            if image_path.is_file():
+            if filename and image_path.is_file():
                 signatures.append(
                     [label, PdfImage(str(image_path), width=2.2 * inch, height=0.8 * inch)]
                 )
-        if signatures:
-            story.extend(
-                [
-                    Paragraph("Signatures", styles["Heading2"]),
-                    Table(signatures, colWidths=[1.7 * inch, 4.9 * inch]),
-                ]
-            )
+            else:
+                signatures.append([label, "\n\n____________________________\nDate: _______________________"])
+        signature_table = Table(signatures, colWidths=[1.7 * inch, 4.9 * inch])
+        signature_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ]))
+        story.extend([
+            Paragraph("Signatures / Offline Approval", styles["Heading2"]),
+            signature_table,
+        ])
     story.extend(
         [
             Spacer(1, 0.2 * inch),

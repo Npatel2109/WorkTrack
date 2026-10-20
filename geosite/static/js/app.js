@@ -170,7 +170,8 @@
             const state = document.createElement("td");
             const pill = document.createElement("span");
             pill.className = `status-pill ${employee.status}`;
-            pill.textContent = employee.status[0].toUpperCase() + employee.status.slice(1);
+            const label = employee.status.replaceAll("-", " ");
+            pill.textContent = label[0].toUpperCase() + label.slice(1);
             state.append(pill);
             row.append(employeeCell, siteCell, time, state);
             fragment.append(row);
@@ -187,6 +188,10 @@
           body.replaceChildren(fragment);
           const onsite = document.getElementById("onsite-stat");
           if (onsite) onsite.textContent = data.onsite_count;
+          const pendingLeave = document.getElementById("pending-leave-stat");
+          if (pendingLeave) pendingLeave.textContent = data.pending_leave_count;
+          const onLeave = document.getElementById("on-leave-stat");
+          if (onLeave) onLeave.textContent = data.on_leave_count;
         } catch (error) {
           console.error("Unable to refresh employee status.", error);
         }

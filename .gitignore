@@ -7,3 +7,6 @@ instance/
 .coverage
 htmlcov/
 migrations/versions/__pycache__/
+android/build/
+*.keystore
+*.jks
