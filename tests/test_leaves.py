@@ -206,7 +206,7 @@ class LeaveTests(unittest.TestCase):
 
     def test_leave_does_not_hide_active_site_visit(self):
         self.add_leave(status="approved")
-        site = AssignedSite(employee_id=self.employee.id, site_name="Test site",
+        site = AssignedSite(site_name="Test site",
                             customer_name="Customer", address="Test address",
                             latitude=0, longitude=0, allowed_radius=100)
         db.session.add(site)

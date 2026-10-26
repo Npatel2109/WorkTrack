@@ -88,42 +88,26 @@ class AndroidDownloadTests(SettingsTestCase):
         self.assertEqual(self.client.post("/admin/settings", data={}).status_code, 400)
 
 
-    def test_tunnel_controls_require_admin_confirmation_and_non_debug(self):
+    def test_removed_tunnel_endpoints_are_unavailable(self):
         url = "/admin/settings/tunnel"
-        self.assertEqual(self.client.post(url).status_code, 302)
+        self.assertEqual(self.client.post(url).status_code, 404)
         self.login(self.employee)
-        self.assertEqual(self.client.post(url).status_code, 403)
-        self.assertEqual(self.client.get(url + "/status").status_code, 403)
+        self.assertEqual(self.client.post(url).status_code, 404)
+        self.assertEqual(self.client.get(url + "/status").status_code, 404)
         self.client.post("/logout")
         self.login(self.admin)
-        controller = self.app.extensions["quick_tunnel"]
-        with patch.object(controller, "start") as start:
-            response = self.client.post(url, data={"action": "start"}, follow_redirects=True)
-            self.assertIn(b"Confirm that you want", response.data)
-            start.assert_not_called()
-            self.app.debug = True
-            response = self.client.post(url, data={"action": "start", "confirm_public": "yes"}, follow_redirects=True)
-            self.assertIn(b"restart without --debug", response.data)
-            start.assert_not_called()
-            self.app.debug = False
-            self.client.post(url, data={"action": "start", "confirm_public": "yes"})
-            start.assert_called_once()
-        with patch.object(controller, "stop") as stop:
-            self.client.post(url, data={"action": "stop"})
-            stop.assert_called_once()
-        self.assertEqual(self.client.post(url, data={"action": "bad"}).status_code, 400)
-        self.assertEqual(self.client.get(url + "/status").json["running"], False)
-        self.app.config["WTF_CSRF_ENABLED"] = True
-        self.assertEqual(self.client.post(url, data={"action": "start", "confirm_public": "yes"}).status_code, 400)
+        for action in ("start", "stop"):
+            self.assertEqual(self.client.post(url, data={"action": action}).status_code, 404)
+        self.assertEqual(self.client.get(url + "/status").status_code, 404)
+        self.assertNotIn("quick_tunnel", self.app.extensions)
 
-    def test_tunnel_start_errors_are_visible(self):
+    def test_settings_no_longer_offer_temporary_global_access(self):
         self.login(self.admin)
-        with patch.object(self.app.extensions["quick_tunnel"], "start",
-                          side_effect=RuntimeError("cloudflared is not installed")):
-            response = self.client.post("/admin/settings/tunnel", data={
-                "action": "start", "confirm_public": "yes",
-            }, follow_redirects=True)
-        self.assertIn(b"cloudflared is not installed", response.data)
+        response = self.client.get("/admin/settings")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"Temporary global access", response.data)
+        self.assertNotIn(b"refresh-tunnel", response.data)
+        self.assertIn(b"Email (password reset)", response.data)
 
 
 class MailSettingsTests(SettingsTestCase):

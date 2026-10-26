@@ -1,18 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Site assignments{% endblock %}
+{% block title %}Site catalog{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">FIELD OPERATIONS</p><h1>Site assignments</h1><p class="text-secondary mb-0">Assign multiple sites per engineer and edit each assignment separately.</p></div></div>
+<div class="page-heading"><div><p class="eyebrow">FIELD OPERATIONS</p><h1>Site catalog</h1><p class="text-secondary mb-0">Add each site once. Assign it to any number of engineers in Assign sites.</p></div><a class="btn btn-outline-primary" href="{{ url_for('main.site_assignments') }}">Assign sites</a></div>
 <div class="row g-4">
-  <div class="col-xl-4"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">ASSIGNMENT</p><h2>{{ "Edit site assignment" if editing_site else "Add site assignment" }}</h2></div></div>
-    {% if not employees %}<div class="alert alert-info">Create an active employee before assigning a site.</div>{% endif %}
+  <div class="col-xl-4"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">SITE DETAILS</p><h2>{{ "Edit site" if editing_site else "Add site" }}</h2></div></div>
     <form method="post" action="{{ url_for('main.sites', site_id=editing_site.id) if editing_site else url_for('main.sites') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label class="form-label">Employee</label><select class="form-select mb-3" name="employee_id" required><option value="">Select employee</option>{% for employee in employees %}<option value="{{ employee.id }}" {% if values and values.employee_id|string == employee.id|string %}selected{% endif %} {% if assignment_has_history and employee.id != editing_site.employee_id %}disabled{% endif %}>{{ employee.name }}{{ " (inactive)" if not employee.is_active else "" }}</option>{% endfor %}</select>
-      {% if assignment_has_history %}<p class="form-text">The engineer is fixed because this assignment has attendance or invoice history. Site details remain editable between visits.</p>{% endif %}
       <label class="form-label">Site name</label><input class="form-control mb-3" name="site_name" maxlength="160" value="{{ values.site_name if values else '' }}" required>
       <label class="form-label">Customer name</label><input class="form-control mb-3" name="customer_name" maxlength="160" value="{{ values.customer_name if values else '' }}" required>
       <label class="form-label">Project (report header)</label><input class="form-control mb-3" name="project_name" maxlength="250" value="{{ values.project_name if values else '' }}">
-      <label class="form-label">PO number</label><input class="form-control mb-3" name="po_number" maxlength="120" value="{{ values.po_number if values else '' }}">
-      <label class="form-label">PO date</label><input class="form-control mb-3" name="po_date" type="date" value="{{ (values.po_date or '') if values else '' }}">
       {% set header_site = values %}{% set header_suffix = 'assignment' %}{% include "_report_signoff_fields.html" %}{% set header_suffix = none %}
       <label class="form-label" for="site-address">Address</label><textarea class="form-control" id="site-address" name="address" rows="2" required>{{ values.address if values else '' }}</textarea>
       <div class="d-flex align-items-center gap-2 mt-2 mb-2"><button class="btn btn-sm btn-outline-primary" id="find-site-address" type="button">Find address on map</button><span class="small text-secondary" id="site-map-status">Search the address or click/drag a map pin.</span></div>
@@ -22,29 +17,27 @@
         <div class="col-6"><label class="form-label">Longitude</label><input class="form-control mb-3" id="site-longitude" name="longitude" type="number" min="-180" max="180" step="any" value="{{ values.longitude if values else '' }}" required></div>
       </div>
       <label class="form-label">Reference radius (meters; does not block visits)</label><input class="form-control mb-3" name="allowed_radius" type="number" min="10" max="5000" value="{{ values.allowed_radius if values else 100 }}" required>
-      <p class="form-text">{{ "Changes apply only to this assignment. Saved attendance coordinates and distances remain unchanged." if editing_site else "Adding a site keeps all existing assignments. An engineer can have multiple sites, with one active visit at a time." }}</p>
-      <button class="btn btn-primary w-100" {% if not employees %}disabled{% endif %}>{{ "Save changes" if editing_site else "Add assignment" }}</button>
+      <p class="form-text">Site details are shared by all assigned engineers. Saved attendance coordinates and distances remain unchanged. Use Assign sites to change engineer access.</p>
+      <button class="btn btn-primary w-100">{{ "Save changes" if editing_site else "Add site" }}</button>
       {% if editing_site %}<a class="btn btn-outline-secondary w-100 mt-2" href="{{ url_for('main.sites') }}">Cancel editing</a>{% endif %}
     </form>
   </section></div>
-  <div class="col-xl-8"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">ASSIGNED LOCATIONS</p><h2>Sites <span class="count-badge">{{ sites|length }}</span></h2></div></div>
+  <div class="col-xl-8"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">SITE CATALOG</p><h2>Sites <span class="count-badge">{{ sites|length }}</span></h2></div></div>
     <div class="row g-3">{% for site in sites %}
       <div class="col-md-6"><article class="site-card">
         <div class="d-flex justify-content-between gap-2"><div><span class="eyebrow">{{ site.customer_name }}</span><h3>{{ site.site_name }}</h3></div><span class="status-pill assigned">{{ site.allowed_radius|int }} m</span></div>
-        <p class="text-secondary small">{{ site.address }}</p><p class="small mb-3"><strong>Engineer:</strong> {{ site.employee.name }}<br><span class="text-secondary">{{ "%.5f"|format(site.latitude) }}, {{ "%.5f"|format(site.longitude) }}</span></p>
+        <p class="text-secondary small">{{ site.address }}</p><p class="small mb-3"><strong>Engineers:</strong> {% for assignment in site.assignments if assignment.is_active %}{{ assignment.employee.name }}{{ ", " if not loop.last else "" }}{% else %}Unassigned{% endfor %}<br><span class="text-secondary">{{ "%.5f"|format(site.latitude) }}, {{ "%.5f"|format(site.longitude) }}</span></p>
         <form class="mb-3" method="post" action="{{ url_for('main.site_report_details', site_id=site.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <label class="form-label" for="project-{{ site.id }}">Project</label><input class="form-control mb-2" id="project-{{ site.id }}" name="project_name" maxlength="250" value="{{ site.project_name }}">
-          <label class="form-label" for="po-{{ site.id }}">PO number</label><input class="form-control mb-2" id="po-{{ site.id }}" name="po_number" maxlength="120" value="{{ site.po_number }}">
-          <label class="form-label" for="po-date-{{ site.id }}">PO date</label><input class="form-control mb-2" id="po-date-{{ site.id }}" name="po_date" type="date" value="{{ site.po_date or '' }}">
           {% set header_site = site %}{% include "_report_signoff_fields.html" %}
           <button class="btn btn-sm btn-outline-primary">Save report header</button>
         </form>
-        <div class="d-flex gap-2"><a class="btn btn-sm btn-primary" href="{{ url_for('main.sites', site_id=site.id) }}">Edit assignment</a><a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps/dir/?api=1&amp;destination={{ site.latitude }},{{ site.longitude }}">Navigate</a>
-          <form method="post" action="{{ url_for('main.delete_site', site_id=site.id) }}" onsubmit="return confirm('Remove this site assignment?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger">Remove</button></form>
+        <div class="d-flex gap-2"><a class="btn btn-sm btn-primary" href="{{ url_for('main.sites', site_id=site.id) }}">Edit site</a><a class="btn btn-sm btn-outline-primary" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps/dir/?api=1&amp;destination={{ site.latitude }},{{ site.longitude }}">Navigate</a>
+          <form method="post" action="{{ url_for('main.delete_site', site_id=site.id) }}" onsubmit="return confirm('Remove this shared site and all its engineer assignments? Sites with history cannot be deleted.')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger">Remove</button></form>
         </div>
       </article></div>
-    {% else %}<div class="empty-state">No sites have been assigned yet.</div>{% endfor %}</div>
+    {% else %}<div class="empty-state">No sites in the catalog yet.</div>{% endfor %}</div>
   </section></div>
 </div>
 {% endblock %}

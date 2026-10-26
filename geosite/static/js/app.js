@@ -1,4 +1,13 @@
 (() => {
+  const passwordToggle = document.getElementById("toggle-password");
+  passwordToggle?.addEventListener("click", () => {
+    const password = document.getElementById("password");
+    const visible = password.type === "password";
+    password.type = visible ? "text" : "password";
+    passwordToggle.textContent = visible ? "Hide" : "Show";
+    passwordToggle.setAttribute("aria-label", visible ? "Hide password" : "Show password");
+    passwordToggle.setAttribute("aria-pressed", String(visible));
+  });
   const themeButton = document.getElementById("theme-toggle");
   if (localStorage.getItem("geosite-theme") === "dark") {
     document.documentElement.dataset.theme = "dark";

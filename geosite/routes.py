@@ -25,11 +25,12 @@ from flask import (
 )
 from flask_login import current_user, login_required, login_user, logout_user
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from .extensions import db
 from .attendance import daily_cutoff, stop_attendance
-from .models import AppSettings, AssignedSite, Attendance, AuditLog, Invoice, LeaveRequest, SiteReport, User, utcnow
+from .timeutils import INDIA_TIME, format_ist, india_date
+from .models import AppSettings, AssignedSite, Attendance, AuditLog, Invoice, LeaveRequest, SiteAssignment, SiteReport, User, utcnow
 from .services import (
     generate_invoice_pdf,
     generate_site_report_pdf,
@@ -93,8 +94,8 @@ def _valid_verification(value, flow, key, identifier):
 
 
 def _employee_site(site_id):
-    site = AssignedSite.query.filter_by(
-        id=site_id, employee_id=current_user.id, is_active=True
+    site = AssignedSite.query.filter_by(id=site_id, is_active=True).filter(
+        AssignedSite.assignments.any(employee_id=current_user.id, is_active=True)
     ).first()
     if not site:
         abort(404)
@@ -144,11 +145,11 @@ def _pdf_response(attendance):
     return response
 
 
-def _date_filtered(query, start_date, end_date):
-    start = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+def _date_filtered(query, start_date, end_date, tz=timezone.utc):
+    start = datetime.combine(start_date, datetime.min.time(), tzinfo=tz).astimezone(timezone.utc)
     end = datetime.combine(
-        end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
-    )
+        end_date + timedelta(days=1), datetime.min.time(), tzinfo=tz
+    ).astimezone(timezone.utc)
     return query.filter(Attendance.checkout_time >= start, Attendance.checkout_time < end)
 
 
@@ -178,7 +179,7 @@ def _leave_counts(today):
 
 def _live_rows(today):
     rows = []
-    on_leave = {leave.employee_id for leave in _leaves_today(today)}
+    on_leave = {leave.employee_id for leave in _leaves_today(utcnow().date())}
     employees = User.query.filter_by(role="employee").order_by(User.name).all()
     for employee in employees:
         active = (
@@ -191,7 +192,8 @@ def _live_rows(today):
             .order_by(Attendance.checkout_time.desc()).first()
         )
         assignments = sorted(
-            (site for site in employee.assigned_sites if site.is_active),
+            (assignment.site for assignment in employee.site_assignments
+             if assignment.is_active and assignment.site.is_active),
             key=lambda site: (site.site_name, site.id),
         )
         assigned = assignments[0] if assignments else None
@@ -212,7 +214,7 @@ def _live_rows(today):
         completed_today = bool(
             last_completed
             and last_completed.checkout_time
-            and last_completed.checkout_time.date() == today
+            and india_date(last_completed.checkout_time) == today
         )
         status = (
             "onsite"
@@ -390,45 +392,9 @@ def app_settings():
         "settings.html", settings=settings,
         android_server_url=current_app.config["ANDROID_SERVER_URL"],
         apk_ready=Path(current_app.config["ANDROID_APK_PATH"]).is_file(),
-        tunnel=current_app.extensions["quick_tunnel"].snapshot(),
         env_mail_server=current_app.config["MAIL_SERVER"],
         env_public_url=current_app.config["PUBLIC_BASE_URL"],
     )
-
-
-@bp.route("/admin/settings/tunnel", methods=["POST"])
-@admin_required
-def manage_tunnel():
-    tunnel = current_app.extensions["quick_tunnel"]
-    action = request.form.get("action")
-    if action == "start":
-        if request.form.get("confirm_public") != "yes":
-            flash("Confirm that you want to make this app publicly reachable before creating a link.", "danger")
-        elif current_app.debug:
-            flash("Stop the debug server and restart without --debug before creating a public link.", "danger")
-        else:
-            try:
-                tunnel.start()
-            except RuntimeError as error:
-                flash(str(error), "danger")
-            else:
-                write_audit(current_user, "public_tunnel_started", "Temporary public link requested")
-                db.session.commit()
-                flash("Creating the link. Refresh tunnel status in a few seconds.", "success")
-    elif action == "stop":
-        tunnel.stop()
-        write_audit(current_user, "public_tunnel_stopped")
-        db.session.commit()
-        flash("Temporary public access stopped. Any saved Android address is unchanged; replace it if needed.", "success")
-    else:
-        abort(400)
-    return redirect(url_for("main.app_settings"))
-
-
-@bp.route("/admin/settings/tunnel/status")
-@admin_required
-def tunnel_status():
-    return jsonify(current_app.extensions["quick_tunnel"].snapshot())
 
 
 @bp.route("/download/android")
@@ -515,24 +481,19 @@ def logout():
 @bp.route("/admin")
 @admin_required
 def admin_dashboard():
-    today = datetime.now(timezone.utc).date()
+    today = india_date(utcnow())
     rows = _live_rows(today)
-    completed_today = Attendance.query.filter(
-        Attendance.status == "completed",
-        func.date(Attendance.checkout_time) == today.isoformat(),
+    completed_today = _date_filtered(
+        Attendance.query.filter_by(status="completed"), today, today, INDIA_TIME
     ).count()
     week_start = today - timedelta(days=6)
-    data = (
-        db.session.query(func.date(Attendance.checkout_time), func.count(Attendance.id))
-        .filter(
-            Attendance.status == "completed",
-            Attendance.checkout_time
-            >= datetime.combine(week_start, datetime.min.time(), tzinfo=timezone.utc),
-        )
-        .group_by(func.date(Attendance.checkout_time))
-        .all()
-    )
-    counts = {str(day): count for day, count in data}
+    visits = _date_filtered(
+        Attendance.query.filter_by(status="completed"), week_start, today, INDIA_TIME
+    ).with_entities(Attendance.checkout_time).all()
+    counts = {}
+    for (checkout_time,) in visits:
+        day = india_date(checkout_time).isoformat()
+        counts[day] = counts.get(day, 0) + 1
     labels = [(week_start + timedelta(days=offset)).isoformat() for offset in range(7)]
     return render_template(
         "admin_dashboard.html",
@@ -546,14 +507,14 @@ def admin_dashboard():
         map_sites=AssignedSite.query.filter_by(is_active=True).order_by(AssignedSite.site_name).all(),
         chart_labels=labels,
         chart_values=[counts.get(day, 0) for day in labels],
-        **_leave_counts(today),
+        **_leave_counts(utcnow().date()),
     )
 
 
 @bp.route("/admin/metrics/<metric>")
 @admin_required
 def admin_metric(metric):
-    today = datetime.now(timezone.utc).date()
+    today = india_date(utcnow())
     rows = []
     headings = ("Employee", "Details", "Status", "Report")
     if metric == "employees":
@@ -572,7 +533,7 @@ def admin_metric(metric):
         for site in AssignedSite.query.filter_by(is_active=True).order_by(AssignedSite.site_name):
             rows.append(
                 {
-                    "employee": site.employee.name,
+                    "employee": ", ".join(a.employee.name for a in site.assignments if a.is_active) or "Unassigned",
                     "details": f"{site.site_name} - {site.customer_name} - {site.address}",
                     "status": "Assigned",
                     "pdf_url": None,
@@ -584,7 +545,7 @@ def admin_metric(metric):
             rows.append(
                 {
                     "employee": visit.employee.name,
-                    "details": f"{visit.site.site_name} - {visit.checkin_time:%Y-%m-%d %H:%M UTC}",
+                    "details": f"{visit.site.site_name} - {format_ist(visit.checkin_time)}",
                     "status": "Onsite",
                     "pdf_url": None,
                 }
@@ -594,21 +555,20 @@ def admin_metric(metric):
         for visit in Attendance.query.filter_by(status="report_pending").order_by(Attendance.checkout_time.desc()):
             rows.append({
                 "employee": visit.employee.name,
-                "details": f"{visit.site.site_name} - Stopped {visit.checkout_time:%Y-%m-%d %H:%M UTC}",
+                "details": f"{visit.site.site_name} - Stopped {format_ist(visit.checkout_time)}",
                 "status": "Auto-stopped; report pending" if visit.auto_closed else "Report pending",
                 "pdf_url": None,
             })
     elif metric == "completed":
         title = "Completed today"
-        visits = Attendance.query.filter(
-            Attendance.status == "completed",
-            func.date(Attendance.checkout_time) == today.isoformat(),
+        visits = _date_filtered(
+            Attendance.query.filter_by(status="completed"), today, today, INDIA_TIME
         ).order_by(Attendance.checkout_time.desc())
         for visit in visits:
             rows.append(
                 {
                     "employee": visit.employee.name,
-                    "details": f"{visit.site.site_name} - {visit.checkout_time:%Y-%m-%d %H:%M UTC}",
+                    "details": f"{visit.site.site_name} - {format_ist(visit.checkout_time)}",
                     "status": "Completed",
                     "pdf_url": url_for("main.download_pdf", attendance_id=visit.id)
                     if visit.report
@@ -621,7 +581,7 @@ def admin_metric(metric):
             rows.append(
                 {
                     "employee": report.attendance.employee.name,
-                    "details": f"{report.attendance.site.site_name} - Submitted {report.report_date:%Y-%m-%d}",
+                    "details": f"{report.attendance.site.site_name} - Submitted {format_ist(report.report_date)}",
                     "status": "Submitted",
                     "pdf_url": url_for("main.download_pdf", attendance_id=report.attendance_id),
                 }
@@ -636,10 +596,10 @@ def admin_metric(metric):
 @bp.route("/api/admin/live-status")
 @admin_required
 def live_status():
-    today = utcnow().date()
+    today = india_date(utcnow())
     rows = _live_rows(today)
     return jsonify(
-        **_leave_counts(today),
+        **_leave_counts(utcnow().date()),
         onsite_count=sum(row["status"] == "onsite" for row in rows),
         pending_report_count=Attendance.query.filter_by(status="report_pending").count(),
         employees=[
@@ -648,7 +608,7 @@ def live_status():
                 "designation": row["employee"].designation,
                 "site": ", ".join(site.site_name for site in row["sites"]) or None,
                 "customer": ", ".join(dict.fromkeys(site.customer_name for site in row["sites"])) or None,
-                "checkin_time": row["attendance"].checkin_time.strftime("%H:%M")
+                "checkin_time": format_ist(row["attendance"].checkin_time, "%H:%M IST")
                 if row["attendance"]
                 else None,
                 "status": row["status"],
@@ -760,38 +720,25 @@ def delete_employee(user_id):
 @admin_required
 def sites(site_id=None):
     editing_site = db.get_or_404(AssignedSite, site_id) if site_id is not None else None
-    has_history = bool(editing_site and (
-        Attendance.query.filter_by(site_id=editing_site.id).first()
-        or Invoice.query.filter_by(site_id=editing_site.id).first()
-    ))
     if editing_site and Attendance.query.filter_by(site_id=editing_site.id, status="onsite").first():
         flash("This site cannot be edited during an active visit. Other assignments can still be added or edited.", "danger")
         return redirect(url_for("main.sites"))
     values = request.form if request.method == "POST" else editing_site
     if request.method == "POST":
         try:
-            employee_id = int(request.form.get("employee_id", ""))
             latitude = float(request.form.get("latitude", ""))
             longitude = float(request.form.get("longitude", ""))
             radius = float(request.form.get("allowed_radius", "100"))
-            employee = User.query.filter_by(
-                id=employee_id, role="employee", is_active=True
-            ).first()
             details = [
                 request.form.get(key, "").strip()
                 for key in ("site_name", "customer_name", "address")
             ]
             project_name = request.form.get("project_name", "").strip()
-            po_number = request.form.get("po_number", "").strip()
-            po_raw = request.form.get("po_date", "").strip()
-            po_date = date.fromisoformat(po_raw) if po_raw else None
-            if len(project_name) > 250 or len(po_number) > 120:
+            if len(project_name) > 250:
                 raise ValueError
             signoff = _report_signoff_fields()
-            if not employee and editing_site and employee_id == editing_site.employee_id:
-                employee = editing_site.employee
             if (
-                not employee or not all(details)
+                not all(details)
                 or len(details[0]) > 160 or len(details[1]) > 160
             ):
                 raise ValueError
@@ -802,20 +749,15 @@ def sites(site_id=None):
             ):
                 raise ValueError
         except (TypeError, ValueError):
-            flash("Enter valid site details, coordinates, radius, employee and PO date. Keep company/manager fields within their limits and remarks to five lines (2,000 characters).", "danger")
+            flash("Enter valid site details, coordinates and radius. Keep company/manager fields within their limits and remarks to five lines (2,000 characters).", "danger")
         else:
-            if editing_site and has_history and employee_id != editing_site.employee_id:
-                flash("The assigned engineer cannot be changed after attendance or invoice history exists. Add a separate assignment instead.", "danger")
-                return redirect(url_for("main.sites", site_id=editing_site.id))
             if editing_site:
                 site = editing_site
-                site.employee_id = employee_id
                 site.site_name, site.customer_name, site.address = details
                 site.latitude, site.longitude = latitude, longitude
                 site.allowed_radius = radius
             else:
                 site = AssignedSite(
-                    employee_id=employee_id,
                     site_name=details[0],
                     customer_name=details[1],
                     address=details[2],
@@ -824,22 +766,67 @@ def sites(site_id=None):
                     allowed_radius=radius,
                 )
                 db.session.add(site)
-            site.project_name, site.po_number, site.po_date = project_name, po_number, po_date
+            site.project_name = project_name
             for key, value in signoff.items():
                 setattr(site, key, value)
             db.session.flush()
-            write_audit(current_user, "site_updated" if editing_site else "site_assigned",
-                        f"Site {site.id}: {site.site_name} -> {employee.email}")
+            write_audit(current_user, "site_updated" if editing_site else "site_created",
+                        f"Site {site.id}: {site.site_name}")
             db.session.commit()
-            flash("Site assignment saved.", "success")
+            flash("Site details saved. Use Assign sites to select engineers.", "success")
             return redirect(url_for("main.sites"))
     active_sites = AssignedSite.query.filter_by(is_active=True).order_by(AssignedSite.site_name).all()
-    employee_options = User.query.filter_by(role="employee", is_active=True).order_by(User.name).all()
-    if editing_site and all(employee.id != editing_site.employee_id for employee in employee_options):
-        employee_options.append(editing_site.employee)
     return render_template(
-        "sites.html", sites=active_sites, employees=employee_options,
-        editing_site=editing_site, values=values, assignment_has_history=has_history,
+        "sites.html", sites=active_sites, editing_site=editing_site, values=values,
+    )
+
+
+@bp.route("/admin/assignments", methods=["GET", "POST"])
+@admin_required
+def site_assignments():
+    employees = User.query.filter_by(role="employee", is_active=True).order_by(User.name).all()
+    raw_id = request.form.get("employee_id") if request.method == "POST" else request.args.get("employee_id")
+    employee = None
+    if raw_id:
+        try:
+            employee_id = int(raw_id)
+        except ValueError:
+            abort(400, description="Select a valid engineer.")
+        employee = User.query.filter_by(id=employee_id, role="employee", is_active=True).first_or_404()
+    if request.method == "POST":
+        if employee is None:
+            abort(400, description="Select an engineer before assigning sites.")
+        try:
+            selected = {int(value) for value in request.form.getlist("site_ids")}
+        except ValueError:
+            abort(400, description="Select valid sites.")
+        available = {site.id for site in AssignedSite.query.filter_by(is_active=True)}
+        if not selected <= available:
+            abort(400, description="Only active catalog sites can be assigned.")
+        # Serialize changes for the same engineer and keep historical membership rows.
+        db.session.query(User).filter_by(id=employee.id).with_for_update().one()
+        existing = {a.site_id: a for a in SiteAssignment.query.filter_by(employee_id=employee.id)}
+        removing = {site_id for site_id, a in existing.items() if a.is_active} - selected
+        if removing and Attendance.query.filter(
+            Attendance.employee_id == employee.id, Attendance.status == "onsite",
+            Attendance.site_id.in_(removing),
+        ).first():
+            flash("Cannot unassign a site while this engineer has an active visit there. No assignments were changed.", "danger")
+        else:
+            for site_id, assignment in existing.items():
+                assignment.is_active = site_id in selected
+            for site_id in selected - existing.keys():
+                db.session.add(SiteAssignment(employee_id=employee.id, site_id=site_id))
+            write_audit(current_user, "site_assignments_updated",
+                        f"Engineer {employee.id}; active sites: {sorted(selected)}")
+            db.session.commit()
+            flash("Engineer site assignments saved.", "success")
+        return redirect(url_for("main.site_assignments", employee_id=employee.id))
+    selected = {a.site_id for a in employee.site_assignments if a.is_active} if employee else set()
+    return render_template(
+        "assignments.html", employees=employees, selected_employee=employee,
+        sites=AssignedSite.query.filter_by(is_active=True).order_by(AssignedSite.site_name).all(),
+        selected_sites=selected,
     )
 
 
@@ -864,17 +851,14 @@ def _report_signoff_fields():
 def site_report_details(site_id):
     site = db.get_or_404(AssignedSite, site_id)
     project = request.form.get("project_name", "").strip()
-    po = request.form.get("po_number", "").strip()
     try:
-        raw = request.form.get("po_date", "").strip()
-        po_date = date.fromisoformat(raw) if raw else None
-        if len(project) > 250 or len(po) > 120:
+        if len(project) > 250:
             raise ValueError
         signoff = _report_signoff_fields()
     except ValueError:
-        flash("Enter a valid PO date, project (max 250 characters), PO number (max 120), company (max 160), manager names (max 120) and at most five remarks lines (max 2,000 characters).", "danger")
+        flash("Enter project (max 250 characters), company (max 160), manager names (max 120) and at most five remarks lines (max 2,000 characters).", "danger")
     else:
-        site.project_name, site.po_number, site.po_date = project, po, po_date
+        site.project_name = project
         for key, value in signoff.items():
             setattr(site, key, value)
         write_audit(current_user, "site_report_header_updated", f"Site {site.id}")
@@ -915,7 +899,9 @@ def employee_dashboard():
     )
     return render_template(
         "employee_dashboard.html",
-        sites=AssignedSite.query.filter_by(employee_id=current_user.id, is_active=True).all(),
+        sites=AssignedSite.query.filter_by(is_active=True).filter(
+            AssignedSite.assignments.any(employee_id=current_user.id, is_active=True)
+        ).all(),
         active_attendance=_active_attendance(),
         pending_visits=Attendance.query.filter_by(employee_id=current_user.id, status="report_pending")
         .order_by(Attendance.checkout_time.desc()).all(),
@@ -1290,12 +1276,26 @@ def reports():
     records = query.order_by(Attendance.checkout_time.desc()).all()
     sites_query = AssignedSite.query
     if not current_user.is_admin:
-        sites_query = sites_query.filter_by(employee_id=current_user.id)
+        sites_query = sites_query.filter(_site_history_access(current_user.id))
+    activity_sites = sites_query.order_by(AssignedSite.site_name).all()
+    site_employee_ids = {
+        site.id: sorted(
+            {a.employee_id for a in site.assignments}
+            | {visit.employee_id for visit in site.attendance_records}
+        ) for site in activity_sites
+    }
     return render_template(
         "reports.html", reports=records,
-        activity_sites=sites_query.order_by(AssignedSite.site_name).all(),
+        activity_sites=activity_sites, site_employee_ids=site_employee_ids,
         activity_employees=User.query.filter_by(role="employee").order_by(User.name).all()
         if current_user.is_admin else [],
+    )
+
+
+def _site_history_access(employee_id):
+    return or_(
+        AssignedSite.assignments.any(employee_id=employee_id),
+        AssignedSite.attendance_records.any(employee_id=employee_id),
     )
 
 
@@ -1318,22 +1318,22 @@ def download_activity_excel():
         except ValueError:
             flash("Select an employee for the Excel report.", "danger")
             return redirect(url_for("main.reports", _anchor="activity-export"))
-        query = query.filter_by(employee_id=employee_id)
     else:
-        query = query.filter_by(employee_id=current_user.id)
-    site = query.first_or_404()
+        employee_id = current_user.id
+    employee = User.query.filter_by(id=employee_id, role="employee").first_or_404()
+    site = query.filter(_site_history_access(employee.id)).first_or_404()
     visits = _date_filtered(
-        Attendance.query.filter_by(site_id=site.id, status="completed")
+        Attendance.query.filter_by(site_id=site.id, employee_id=employee.id, status="completed")
         .filter(Attendance.report.has()), start, end
     ).order_by(Attendance.checkout_time, Attendance.id).all()
     leaves = LeaveRequest.query.filter(
-        LeaveRequest.employee_id == site.employee_id,
+        LeaveRequest.employee_id == employee.id,
         LeaveRequest.status == "approved", LeaveRequest.start_date <= end,
         LeaveRequest.end_date >= start,
     ).order_by(LeaveRequest.id).all()
     from .activity_report import activity_workbook
 
-    output = activity_workbook(site, visits, leaves, start, end)
+    output = activity_workbook(site, visits, leaves, start, end, employee)
     return send_file(
         output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True, download_name=f"site-activity-{site.id}-{start}-{end}.xlsx",
@@ -1341,7 +1341,7 @@ def download_activity_excel():
 
 
 @bp.route("/reports/combined.pdf")
-@login_required
+@admin_required
 def download_combined_reports():
     try:
         start_date = datetime.strptime(request.args.get("start_date", ""), "%Y-%m-%d").date()
@@ -1360,7 +1360,7 @@ def download_combined_reports():
     )
     if not current_user.is_admin:
         query = query.filter(Attendance.employee_id == current_user.id)
-    records = _date_filtered(query, start_date, end_date).order_by(
+    records = _date_filtered(query, start_date, end_date, INDIA_TIME).order_by(
         Attendance.checkout_time.asc()
     ).all()
     if not records:
@@ -1379,7 +1379,7 @@ def download_combined_reports():
 
 
 @bp.route("/reports/<int:attendance_id>/pdf")
-@login_required
+@admin_required
 def download_pdf(attendance_id):
     attendance = _attendance_for_user(attendance_id)
     if attendance.status != "completed" or not attendance.report:
@@ -1393,9 +1393,18 @@ def invoices():
     if request.method == "POST":
         try:
             site_id = int(request.form.get("site_id", ""))
+            employee_id = int(request.form.get("employee_id", ""))
             site = AssignedSite.query.filter_by(id=site_id, is_active=True).first()
-            if not site:
-                raise ValueError("Select an active assigned site.")
+            assignment = SiteAssignment.query.filter_by(
+                site_id=site_id, employee_id=employee_id, is_active=True
+            ).first()
+            if not site or not assignment or not assignment.employee.is_active:
+                raise ValueError("Select an active engineer and one of their assigned sites.")
+            po_number = request.form.get("po_number", "").strip()
+            raw_po_date = request.form.get("po_date", "").strip()
+            po_date = date.fromisoformat(raw_po_date) if raw_po_date else None
+            if len(po_number) > 120:
+                raise ValueError("PO number must be at most 120 characters.")
             start_date = datetime.strptime(request.form.get("start_date", ""), "%Y-%m-%d").date()
             end_date = datetime.strptime(request.form.get("end_date", ""), "%Y-%m-%d").date()
             billable_days = int(request.form.get("billable_days", ""))
@@ -1422,8 +1431,9 @@ def invoices():
         else:
             invoice = Invoice(
                 invoice_number=f"GS-{datetime.now(timezone.utc):%Y%m%d}-{uuid.uuid4().hex[:8].upper()}",
-                employee_id=site.employee_id,
+                employee_id=employee_id,
                 site_id=site.id,
+                po_number=po_number, po_date=po_date,
                 customer_name=customer_name,
                 description=description,
                 start_date=start_date,
@@ -1444,14 +1454,11 @@ def invoices():
             db.session.commit()
             flash(f"Invoice {invoice.invoice_number} generated.", "success")
             return redirect(url_for("main.invoices"))
-    site_options = (
-        AssignedSite.query.filter_by(is_active=True)
-        .join(User)
-        .order_by(User.name, AssignedSite.site_name)
-        .all()
-    )
+    site_options = SiteAssignment.query.join(SiteAssignment.site).join(SiteAssignment.employee).filter(
+        SiteAssignment.is_active.is_(True), AssignedSite.is_active.is_(True), User.is_active.is_(True),
+    ).order_by(User.name, AssignedSite.site_name).all()
     invoice_records = Invoice.query.order_by(Invoice.created_at.desc()).limit(500).all()
-    return render_template("invoices.html", sites=site_options, invoices=invoice_records)
+    return render_template("invoices.html", assignments=site_options, invoices=invoice_records)
 
 
 @bp.route("/admin/invoices/<int:invoice_id>/pdf")

@@ -77,11 +77,11 @@ For password reset emails, an administrator can open **Settings ? Email (passwor
 - Dashboard with employee/site totals, onsite/completed status, a completed-visit chart, and assigned-site map
 - Employee account creation, editing, password reset, and delete/deactivate behavior
 - Site assignment with WGS84 coordinates and configurable geofence radius (10–5,000 m; default 100 m)
-- Multiple active site assignments per engineer; **Add assignment** always adds a separate site without replacing earlier assignments
-- **Edit assignment** on each site card opens prefilled site/customer/address, map coordinates, radius and report-header fields. Edits affect only that assignment and are blocked while it has an active visit. Once attendance or invoice history exists, its engineer cannot be changed; add a separate assignment instead. Historical attendance coordinate/distance snapshots remain unchanged; site names/header details use the updated assignment when displayed/exported.
+- **Sites** is a reusable catalog: create each site once without selecting an employee. **Edit site** changes its shared customer/address, map coordinates, radius and report-header details. Edits are blocked while any engineer has an active visit at that site. Historical attendance coordinate/distance snapshots remain unchanged; displayed site names/header details use the updated catalog entry.
+- **Assign sites** is a separate tab: select an active engineer, click **Load assignments**, tick any number of catalog sites and **Save assignments**. The same site can be assigned to multiple engineers without copying its details. Saving again does not duplicate memberships. Unticking removes future start access but preserves earlier visits, reports and membership history; an active visit must be stopped before its site can be unticked.
 - Completed report review, PDF download, Excel export, selfie viewing, attendance history, and account access audit log
 - Clickable dashboard totals that open their matching employee/site/visit/report lists
-- Invoice generation with required service dates, editable billable days, daily rate, currency, customer, and description. Amount is calculated as `billable days × daily rate`.
+- Invoice generation with an explicit engineer/site selection, required service dates, editable billable days, daily rate, currency, customer, and description. Optional **PO number** and **PO date** are manually entered on invoices only. Amount is calculated as `billable days × daily rate`.
 - Invoice PDFs and invoice history; invoices preserve the employee/site details if assignments later change
 
 ### Employee
@@ -90,8 +90,28 @@ For password reset emails, an administrator can open **Settings ? Email (passwor
 - Choose from all assigned sites when starting a visit (only one visit can be active at a time)
 - Start with a fresh GPS capture and live selfie, even outside the assigned site's reference radius
 - Stop with current GPS, or the last server-recorded location when GPS is unavailable; complete the activity/billing report now or later
-- Review and download completed reports
-- Download a single merged PDF for completed reports within a selected date range
+- Review completed visits and download site-activity Excel reports
+- PDF downloads (individual and merged) are admin-only; employee pages have no PDF controls and direct PDF URLs return access denied
+
+The sign-in password field includes a **Show / Hide** button; it starts hidden.
+PO number/date are not collected on catalog sites or included in activity Excel
+reports for either role. Invoice PO fields start blank and are manually entered;
+they are included in the invoice PDF.
+
+### Upgrading to reusable sites
+
+Back up the database and stop all web workers before running
+`flask --app wsgi db upgrade`, then restart them with the new code. The migration
+preserves each existing site ID separately (even similar-looking sites) and
+creates its existing engineer membership with its previous active/inactive
+state. Attendance, reports and invoices keep their site and engineer references.
+No existing sites are automatically merged.
+
+Legacy site PO values remain in the database for historical recovery, but are
+not displayed or exported and are not copied onto invoices. Old invoices get
+blank PO fields rather than fabricated values. The shared-site migration cannot
+be safely downgraded to the former one-engineer-per-site model; restore the
+pre-upgrade database backup and old code if a rollback is required.
 
 ### Visit locations and daily automatic stop
 
@@ -107,9 +127,18 @@ administrator's assigned coordinates. Each new visit snapshots those assigned
 coordinates, so later assignment edits do not change its recorded distances.
 **Admin > Attendance** shows both distances, clickable location links, capture
 timestamps, current/last-known/unavailable source, and automatic-stop status.
-PDF reports retain the distances and stop-location provenance too. Historical
+Attendance and site-report PDFs display both start and stop distances in **km**
+(three decimal places); the database and GPS API continue to store/use meters.
+Site-report PDFs retain stop-location provenance too. Historical
 visits use the assigned coordinates available at migration time; missing
 historical distances and capture provenance are not invented.
+
+Attendance, report pages, admin live check-in times (including polling), dashboard
+details and site-report PDF timestamps are displayed in **IST (UTC+05:30)**.
+Stored timestamps remain UTC; naive database timestamps are treated as UTC
+before conversion. Admin **Completed today** counts/chart use India calendar
+days, and merged PDF date ranges use India checkout dates. The site-activity
+Excel's date grouping remains UTC as documented below.
 
 While an engineer has an active visit and an app page open and visible, it
 requests a fresh location immediately and every minute. Successful fixes replace
@@ -163,7 +192,7 @@ unattended closure. No OS task is installed automatically by the application.
 
 ### Site coordinates
 
-In site assignment, enter an address and use **Find address on map** to look it up, or click the map to drop a pin and drag it to the exact point. The resulting latitude and longitude are saved with the assignment. Address lookup uses OpenStreetMap Nominatim; if it is unavailable, place the pin manually.
+In the site catalog, enter an address and use **Find address on map** to look it up, or click the map to drop a pin and drag it to the exact point. The resulting latitude and longitude are saved with the site. Address lookup uses OpenStreetMap Nominatim; if it is unavailable, place the pin manually.
 
 ### Site activity and billable Excel reports
 
@@ -176,16 +205,16 @@ Previously captured names/signatures remain available in historical PDFs. The si
 work-detail fields are no longer required for new reports. Existing report text
 is retained; legacy reports with no billing choice are explicitly marked
 **Billing not recorded** and count as 0 in the new export, rather than assuming
-they were billable. Individual/merged PDFs and the original admin export remain.
+they were billable. Individual/merged PDFs remain available to admins.
 
-Admins fill **Project**, **PO number**, **PO date**, **Reporting company**,
-**Commissioning manager**, **Project manager** and up to five remarks on site assignments, or use
+Admins fill **Project**, **Reporting company**, **Commissioning manager**,
+**Project manager** and up to five remarks on catalog sites, or use
 **Save report header** on existing site cards. These optional header details are
 used at export time; updating them changes future exports, not saved visits.
 
 Under **Reports**, choose a site/employee and start/end dates, then **Download
 Excel**. The `SAR-R0` worksheet follows the supplied report structure:
-project/customer/PO/engineer headers, SR NO / SITE / DATE / DAY / ACTIVITY DETAIL,
+project/customer/site/engineer headers (no PO fields), SR NO / SITE / DATE / DAY / ACTIVITY DETAIL,
 five numbered remarks lines, total days and three offline sign-off boxes
 (commissioning manager, project manager and engineer), retaining the supplied
 Excel layout with grayscale headers and portrait printing. The report update
@@ -195,7 +224,10 @@ archived assignments. Dates use the completed visit's UTC checkout date.
 Admin **Export Excel** buttons open this same report form rather than a separate
 raw-data spreadsheet. Admins select an employee first, then one of that employee's
 sites and the date range. Both roles use the same workbook generator and layout;
-employee/site ownership is checked on the server as well as in the selector.
+engineer/site membership or visit history is checked on the server as well as in
+the selector. Each export is scoped to the selected engineer's visits and leave,
+even when several engineers share one site. Unassigned engineers can still
+export their own historical activity but cannot start new visits there.
 
 Each completed billable visit is a separate 1-day row; non-billable visits are 0.
 Multiple billable visits on a date each count as 1, as requested. Approved leave
@@ -212,7 +244,7 @@ not fabricated approvals or copies of signatures from unrelated visits.
 Apply the latest migration (`flask --app wsgi db upgrade`) before starting the updated app.
 Employees can open **My leave** or the leave section on their dashboard to apply for
 full-day date ranges or a single morning/afternoon half day, with a required reason.
-Dates use UTC, matching attendance; full-day ranges include weekends. Past start
+Leave submission/review date validation uses UTC; full-day ranges include weekends. Past start
 dates and overlapping pending/approved requests are rejected. Opposite half days
 on the same date are allowed.
 
@@ -284,37 +316,17 @@ Attendance regression checks (JavaScript tests use Node.js's built-in runner):
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p test_workflows.py -v
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p test_attendance_migration.py -v
 node --test tests\location_workflow.test.js
+node --test tests\login_visibility.test.js
 ```
 
-## Temporary public HTTPS link (Cloudflare)
+## Public access
 
-For local single-process testing, administrators can open **Settings → Temporary
-global access**, confirm public exposure and click **Create public link**. Click
-**Refresh tunnel status** until connected, then share the generated
-`https://....trycloudflare.com` link. Admins and employees still sign in normally;
-the tunnel does not bypass roles or expose private uploads directly.
-
-Install the official `cloudflared` executable. On Windows WorkTrack looks for
-`instance/tools/cloudflared.exe`; alternatively set `CLOUDFLARED_PATH` to its
-installed executable path before starting Flask. Start the app **without debug**:
-
-```powershell
-.\.venv\Scripts\python.exe -m flask --app wsgi run --host 0.0.0.0 --port 5000
-```
-
-The tunnel forwards only to `http://127.0.0.1:5000`; this is server configuration,
-not a user-supplied forwarding target. Keep the PC/app running. Stop it with
-**Stop public link** (preferably from the local address). Graceful process exit
-also stops the owned child; a hard crash may require stopping that exact
-cloudflared process manually. Do not use multiple web workers or the debug
-reloader: tunnel ownership/status is local to one app process.
-
-Cloudflare proxies public traffic. Use strong passwords, test data and trusted
-users; the internet can reach the login page. Quick Tunnels are development-only,
-have no availability guarantee and change address on restart. No account/domain
-is needed. The Android app always uses its built-in address and does not use
-tunnel links. Password-reset email links use the public app address from
-Settings (or `PUBLIC_BASE_URL`); configure it separately if needed.
+The former **Temporary global access** panel has been removed. Its start/stop
+and status routes are unavailable, and the app no longer initializes or starts
+a Cloudflare tunnel. Restart old app processes when upgrading so their owned
+tunnels are closed. Use your deployed HTTPS domain for remote access instead.
+Password-reset links use the public app address from Settings (or
+`PUBLIC_BASE_URL`); configure it to your normal deployment address.
 
 ## Android app
 

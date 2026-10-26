@@ -4,10 +4,13 @@
 <div class="page-heading"><div><p class="eyebrow">BILLING</p><h1>Invoices</h1><p class="text-secondary mb-0">Create invoices using billable days multiplied by a daily rate.</p></div></div>
 <div class="row g-4">
   <div class="col-xl-5"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">NEW INVOICE</p><h2>Invoice details</h2></div></div>
-    {% if not sites %}<div class="alert alert-info">Assign an active site before creating an invoice.</div>{% endif %}
+    {% if not assignments %}<div class="alert alert-info">Assign an active site to an engineer before creating an invoice.</div>{% endif %}
     <form method="post" id="invoice-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label class="form-label" for="invoice-site">Employee and site *</label>
-      <select class="form-select mb-3" id="invoice-site" name="site_id" required><option value="">Select employee / site</option>{% for site in sites %}<option value="{{ site.id }}" data-customer="{{ site.customer_name }}">{{ site.employee.name }} · {{ site.site_name }} ({{ site.customer_name }})</option>{% endfor %}</select>
+      <select class="form-select mb-3" id="invoice-site" name="site_id" required><option value="">Select employee / site</option>{% for assignment in assignments %}<option value="{{ assignment.site_id }}" data-employee-id="{{ assignment.employee_id }}" data-customer="{{ assignment.site.customer_name }}">{{ assignment.employee.name }} · {{ assignment.site.site_name }} ({{ assignment.site.customer_name }})</option>{% endfor %}</select>
+      <input type="hidden" id="invoice-employee" name="employee_id">
+      <label class="form-label" for="invoice-po-number">PO number</label><input class="form-control mb-3" id="invoice-po-number" name="po_number" maxlength="120">
+      <label class="form-label" for="invoice-po-date">PO date</label><input class="form-control mb-3" id="invoice-po-date" name="po_date" type="date">
       <label class="form-label" for="invoice-customer">Customer name *</label><input class="form-control mb-3" id="invoice-customer" name="customer_name" maxlength="160" required>
       <label class="form-label" for="invoice-description">Invoice description *</label><textarea class="form-control mb-3" id="invoice-description" name="description" rows="3" required></textarea>
       <div class="row g-3">
@@ -19,13 +22,13 @@
         <div class="col-6"><label class="form-label">Total</label><div class="invoice-total" id="invoice-total">INR 0.00</div></div>
       </div>
       <p class="form-text mt-2">Billable days are prefilled as inclusive calendar days and can be adjusted within the date range. The server recalculates the total.</p>
-      <button class="btn btn-primary w-100 mt-2" {% if not sites %}disabled{% endif %}>Generate invoice</button>
+      <button class="btn btn-primary w-100 mt-2" {% if not assignments %}disabled{% endif %}>Generate invoice</button>
     </form>
   </section></div>
   <div class="col-xl-7"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">INVOICE HISTORY</p><h2>Generated invoices</h2></div><span class="count-badge">{{ invoices|length }}</span></div>
     <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Invoice</th><th>Employee / customer</th><th>Dates</th><th>Total</th><th>PDF</th></tr></thead>
       <tbody>{% for invoice in invoices %}<tr>
-        <td><div class="fw-semibold">{{ invoice.invoice_number }}</div><div class="small text-secondary">{{ invoice.created_at.strftime("%Y-%m-%d") }}</div></td>
+        <td><div class="fw-semibold">{{ invoice.invoice_number }}</div><div class="small text-secondary">{{ invoice.created_at|ist }}</div></td>
         <td>{{ invoice.employee.name }}<div class="small text-secondary">{{ invoice.customer_name }} · {{ invoice.site.site_name }}</div></td>
         <td>{{ invoice.start_date.strftime("%d %b") }} - {{ invoice.end_date.strftime("%d %b %Y") }}<div class="small text-secondary">{{ invoice.billable_days }} day(s)</div></td>
         <td class="fw-semibold">{{ invoice.currency }} {{ "%.2f"|format(invoice.total_amount) }}</td><td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.download_invoice', invoice_id=invoice.id) }}">PDF</a></td>
@@ -45,7 +48,10 @@
   const rate = document.getElementById("daily-rate");
   const currency = document.getElementById("currency");
   const total = document.getElementById("invoice-total");
-  site.addEventListener("change", () => { customer.value = site.selectedOptions[0]?.dataset.customer || ""; });
+  site.addEventListener("change", () => {
+    customer.value = site.selectedOptions[0]?.dataset.customer || "";
+    document.getElementById("invoice-employee").value = site.selectedOptions[0]?.dataset.employeeId || "";
+  });
   const updateTotal = () => { total.textContent = `${currency.value} ${(Number(days.value || 0) * Number(rate.value || 0)).toFixed(2)}`; };
   const calculateDays = () => {
     if (!start.value || !end.value || end.value < start.value) return;

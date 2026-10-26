@@ -3,13 +3,7 @@ from datetime import datetime, time, timedelta, timezone
 from .extensions import db
 from .models import Attendance, AuditLog, utcnow
 from .services import haversine_distance
-
-
-INDIA_TIME = timezone(timedelta(hours=5, minutes=30), name="Asia/Kolkata")
-
-
-def as_utc(value):
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+from .timeutils import INDIA_TIME, as_utc
 
 
 def daily_cutoff(value):

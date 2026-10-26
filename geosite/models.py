@@ -24,9 +24,7 @@ class User(UserMixin, db.Model):
         db.Integer, nullable=False, default=0, server_default=db.text("0")
     )
 
-    assigned_sites = db.relationship(
-        "AssignedSite", back_populates="employee", cascade="all, delete-orphan"
-    )
+    site_assignments = db.relationship("SiteAssignment", back_populates="employee", cascade="all, delete-orphan")
     attendance_records = db.relationship("Attendance", back_populates="employee")
 
     def set_password(self, password):
@@ -99,12 +97,9 @@ class AssignedSite(db.Model):
     __tablename__ = "assigned_sites"
 
     id = db.Column(db.Integer, primary_key=True)
-    employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     site_name = db.Column(db.String(160), nullable=False)
     customer_name = db.Column(db.String(160), nullable=False)
     project_name = db.Column(db.String(250), nullable=False, default="", server_default="")
-    po_number = db.Column(db.String(120), nullable=False, default="", server_default="")
-    po_date = db.Column(db.Date)
     report_company = db.Column(db.String(160), nullable=False, default="", server_default="")
     commissioning_manager = db.Column(db.String(120), nullable=False, default="", server_default="")
     project_manager = db.Column(db.String(120), nullable=False, default="", server_default="")
@@ -116,8 +111,19 @@ class AssignedSite(db.Model):
     assigned_date = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
 
-    employee = db.relationship("User", back_populates="assigned_sites")
+    assignments = db.relationship("SiteAssignment", back_populates="site", cascade="all, delete-orphan")
     attendance_records = db.relationship("Attendance", back_populates="site")
+
+
+class SiteAssignment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("assigned_sites.id"), nullable=False, index=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
+    assigned_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    employee = db.relationship("User", back_populates="site_assignments")
+    site = db.relationship("AssignedSite", back_populates="assignments")
+    __table_args__ = (db.UniqueConstraint("employee_id", "site_id", name="uq_employee_site_assignment"),)
 
 
 class Attendance(db.Model):
@@ -192,6 +198,8 @@ class Invoice(db.Model):
     employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     site_id = db.Column(db.Integer, db.ForeignKey("assigned_sites.id"), nullable=False)
     customer_name = db.Column(db.String(160), nullable=False)
+    po_number = db.Column(db.String(120), nullable=False, default="", server_default="")
+    po_date = db.Column(db.Date)
     description = db.Column(db.Text, nullable=False)
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)

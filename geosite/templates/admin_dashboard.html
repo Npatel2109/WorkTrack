@@ -29,11 +29,11 @@
     <section class="panel-card">
       <div class="section-title"><div><p class="eyebrow">LIVE ATTENDANCE</p><h2>Employee status</h2></div><span class="live-dot-label"><i></i> Refreshes every 15 seconds</span></div>
       <div class="table-responsive"><table class="table align-middle">
-        <thead><tr><th>Employee</th><th>Assigned site</th><th>Check-in time</th><th>Status</th></tr></thead>
+        <thead><tr><th>Employee</th><th>Assigned site</th><th>Check-in time (IST)</th><th>Status</th></tr></thead>
         <tbody id="live-status-body">{% for row in live_rows %}
           <tr><td><div class="fw-semibold">{{ row.employee.name }}</div><div class="small text-secondary">{{ row.employee.designation }}</div></td>
             <td>{{ row.sites|map(attribute="site_name")|join(", ") if row.sites else "No site assigned" }}{% if row.sites %}<div class="small text-secondary">{{ row.sites|map(attribute="customer_name")|unique|join(", ") }}</div>{% endif %}</td>
-            <td>{{ row.attendance.checkin_time.strftime("%H:%M") if row.attendance else "—" }}</td><td><span class="status-pill {{ row.status }}">{{ row.status|replace('-', ' ')|title }}</span></td>
+            <td>{{ row.attendance.checkin_time|ist("%H:%M IST") if row.attendance else "—" }}</td><td><span class="status-pill {{ row.status }}">{{ row.status|replace('-', ' ')|title }}</span></td>
           </tr>
         {% else %}<tr><td colspan="4" class="empty-state">No employees have been added yet.</td></tr>{% endfor %}</tbody>
       </table></div>
@@ -53,7 +53,8 @@
     </section>
     <section class="panel-card mt-4 quick-links"><p class="eyebrow">QUICK ACTIONS</p>
       <a href="{{ url_for('main.employees') }}">Add or manage employees <span>→</span></a>
-      <a href="{{ url_for('main.sites') }}">Assign a site <span>→</span></a>
+      <a href="{{ url_for('main.sites') }}">Manage site catalog <span>→</span></a>
+      <a href="{{ url_for('main.site_assignments') }}">Assign sites to engineers <span>→</span></a>
       <a href="{{ url_for('main.admin_leaves', status='pending') }}">Review leave requests <span>&rarr;</span></a>
       <a href="{{ url_for('main.reports') }}">Review site reports <span>→</span></a>
       <a href="{{ url_for('main.invoices') }}">Generate invoices <span>→</span></a>

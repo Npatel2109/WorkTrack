@@ -14,7 +14,7 @@
         {% for value, label in [('full', 'Full day(s)'), ('morning', 'Half day - morning'), ('afternoon', 'Half day - afternoon')] %}<option value="{{ value }}" {% if request.form.get('period', 'full') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select></div>
       <div class="col-12"><label class="form-label" for="leave-reason">Reason</label><textarea class="form-control" id="leave-reason" name="reason" maxlength="2000" rows="3" required>{{ request.form.get('reason', '') }}</textarea></div>
-      <div class="col-12"><p class="form-text">Half-day requests must use the same start and end date. Full-day ranges include weekends. Dates use UTC, like attendance. Leave requires approval and does not block site visits.</p><button class="btn btn-primary">Submit leave request</button></div>
+      <div class="col-12"><p class="form-text">Half-day requests must use the same start and end date. Full-day ranges include weekends. Leave date validation uses today's UTC date. Leave requires approval and does not block site visits.</p><button class="btn btn-primary">Submit leave request</button></div>
     </div>
   </form>
 </section>
@@ -65,7 +65,7 @@
           <button class="btn btn-sm btn-success" name="decision" value="approved">Approve</button>
           <button class="btn btn-sm btn-outline-danger" name="decision" value="rejected">Reject</button>
         </form>
-      {% elif leave.reviewed_by %}<span class="small">{{ leave.reviewed_by.name }}<br>{{ leave.reviewed_at.strftime("%d %b %Y %H:%M UTC") }}</span>
+      {% elif leave.reviewed_by %}<span class="small">{{ leave.reviewed_by.name }}<br>{{ leave.reviewed_at|ist }}</span>
       {% else %}<span class="text-secondary">Awaiting review</span>{% endif %}</td>
     </tr>{% else %}<tr><td colspan="{{ 7 if current_user.is_admin else 6 }}" class="empty-state">No leave requests found.</td></tr>{% endfor %}</tbody>
   </table></div>

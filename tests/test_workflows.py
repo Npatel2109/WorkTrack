@@ -12,8 +12,9 @@ from openpyxl import load_workbook
 
 from geosite import create_app
 from geosite.attendance import as_utc, close_overdue_visits, daily_cutoff
+from geosite.timeutils import INDIA_TIME, india_date
 from geosite.extensions import db
-from geosite.models import AssignedSite, Attendance, AuditLog, Invoice, LeaveRequest, SiteReport, User
+from geosite.models import AssignedSite, Attendance, AuditLog, Invoice, LeaveRequest, SiteAssignment, SiteReport, User
 
 
 class WorkflowTests(unittest.TestCase):
@@ -50,7 +51,6 @@ class WorkflowTests(unittest.TestCase):
         db.session.add_all([self.admin, self.employee])
         db.session.flush()
         self.site = AssignedSite(
-            employee_id=self.employee.id,
             site_name="North Site",
             customer_name="Example Customer",
             address="1 Example Road",
@@ -59,6 +59,8 @@ class WorkflowTests(unittest.TestCase):
             allowed_radius=100,
         )
         db.session.add(self.site)
+        db.session.flush()
+        db.session.add(SiteAssignment(employee=self.employee, site=self.site))
         db.session.commit()
         self.client = self.app.test_client()
 
@@ -89,8 +91,6 @@ class WorkflowTests(unittest.TestCase):
     def test_activity_excel_layout_billing_leave_and_missing_dates(self):
         start = date(2026, 10, 19)
         self.site.project_name = "=Project text"
-        self.site.po_number = "PO-100"
-        self.site.po_date = start
         self.site.report_company = "Example Reporting Company"
         self.site.commissioning_manager = "Commissioning Lead"
         self.site.project_manager = "Project Lead"
@@ -133,7 +133,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(sheet.title, "SAR-R0")
         self.assertEqual(sheet["A1"].value, "SITE ACTIVITY REPORT")
         self.assertEqual(sheet["A3"].value, "PROJECT : =Project text")
-        self.assertEqual(sheet["A5"].value, "PO NO : PO-100")
+        self.assertTrue(sheet["A5"].value.startswith("REPORT UPDATE DATE :"))
+        self.assertFalse(any("PO NO" in str(cell.value) or "PO DATE" in str(cell.value)
+                             for row in sheet for cell in row))
         self.assertIn("E8:L8", str(sheet.merged_cells))
         self.assertEqual([sheet.cell(8, c).value for c in range(1, 6)],
                          ["SR NO", "SITE", "DATE", "DAY", "ACTIVITY DETAIL"])
@@ -167,10 +169,12 @@ class WorkflowTests(unittest.TestCase):
         other.set_password("other-password-123")
         db.session.add(other)
         db.session.flush()
-        site = AssignedSite(employee_id=other.id, site_name="Private Site",
+        site = AssignedSite(site_name="Private Site",
                             customer_name="Customer", address="Address",
                             latitude=0, longitude=0)
         db.session.add(site)
+        db.session.flush()
+        db.session.add(SiteAssignment(employee=other, site=site))
         db.session.commit()
         self._login_employee()
         params = {"site_id": site.id, "start_date": "2026-10-19", "end_date": "2026-10-20"}
@@ -216,21 +220,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.post(url, data={}).status_code, 403)
         self.client.post("/logout")
         self.client.post("/login", data={"email": self.admin.email, "password": "admin-password-123"})
-        self.client.post(url, data={"project_name": "Commissioning", "po_number": "PO-42",
-                                   "po_date": "2026-10-01", "report_company": "Company",
+        self.client.post(url, data={"project_name": "Commissioning", "report_company": "Company",
                                    "commissioning_manager": "Manager One",
                                    "project_manager": "Manager Two", "report_remarks": "One\nTwo"})
         db.session.refresh(self.site)
         self.assertEqual(self.site.project_name, "Commissioning")
-        self.assertEqual(self.site.po_number, "PO-42")
-        self.assertEqual(self.site.po_date, date(2026, 10, 1))
         self.assertEqual(self.site.report_company, "Company")
         self.assertEqual(self.site.commissioning_manager, "Manager One")
         self.assertEqual(self.site.project_manager, "Manager Two")
         self.assertEqual(self.site.report_remarks, "One\nTwo")
-        response = self.client.post(url, data={"po_date": "bad"}, follow_redirects=True)
-        self.assertIn(b"Enter a valid PO date", response.data)
-        self.assertEqual(self.site.po_number, "PO-42")
         for values in ({"report_remarks": "Line\n" * 6}, {"report_company": "x" * 161},
                        {"project_manager": "x" * 121}, {"commissioning_manager": "x" * 121}):
             response = self.client.post(url, data=values, follow_redirects=True)
@@ -312,6 +310,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(SiteReport.query.one().employee_signature, "")
         self.assertEqual(SiteReport.query.one().customer_signature, "")
 
+        self.assertEqual(self.client.get(f"/reports/{attendance.id}/pdf").status_code, 403)
+        self.assertEqual(self.client.get("/reports/combined.pdf").status_code, 403)
+        self.assertNotIn(b"Download PDF", self.client.get("/reports").data)
+        self._login_admin()
         single = self.client.get(f"/reports/{attendance.id}/pdf")
         pdf = PdfReader(io.BytesIO(single.data))
         page_count = len(pdf.pages)
@@ -323,8 +325,8 @@ class WorkflowTests(unittest.TestCase):
         combined = self.client.get(
             "/reports/combined.pdf",
             query_string={
-                "start_date": attendance.checkout_time.date().isoformat(),
-                "end_date": attendance.checkout_time.date().isoformat(),
+                "start_date": india_date(attendance.checkout_time).isoformat(),
+                "end_date": india_date(attendance.checkout_time).isoformat(),
             },
         )
         self.assertEqual(combined.status_code, 200)
@@ -389,7 +391,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(visit.checkout_location_time, visit.checkout_time)
         self.assertFalse(visit.auto_closed)
         self.assertIn(b"Complete report", self.client.get("/employee").data)
-        self.assertEqual(self.client.get(f"/reports/{visit.id}/pdf").status_code, 404)
+        self.assertEqual(self.client.get(f"/reports/{visit.id}/pdf").status_code, 403)
         # Assignment edits must not rewrite the original distance reference.
         self.site.longitude = 1
         db.session.commit()
@@ -517,7 +519,7 @@ class WorkflowTests(unittest.TestCase):
         self.client.post("/login", data={"email": self.admin.email, "password": "admin-password-123"})
         response = self.client.get("/admin/attendance")
         self.assertEqual(response.status_code, 200)
-        for text in (b"1111.9 m from assigned site", b"Last captured location", b"Daily Cutoff",
+        for text in (b"1.112 km from assigned site", b"Last captured location", b"Daily Cutoff",
                      b"Report Pending", b"0.00000, 0.01000", b"Auto-stopped (23:59 India)"):
             self.assertIn(text, response.data)
         live = self.client.get("/api/admin/live-status").json
@@ -585,17 +587,163 @@ class WorkflowTests(unittest.TestCase):
             "employee_id": str(self.employee.id), "site_name": "South Site",
             "customer_name": "South Customer", "address": "2 Example Road",
             "latitude": "19", "longitude": "72", "allowed_radius": "250",
-            "project_name": "Project Two", "po_number": "PO-200", "po_date": "2026-10-01",
+            "project_name": "Project Two",
             "report_company": "Reporting Co", "commissioning_manager": "Commissioning Lead",
             "project_manager": "Project Lead", "report_remarks": "First\nSecond",
             **updates,
         }
 
+    def _completed_display_visit(self, stopped_at):
+        visit = Attendance(
+            employee_id=self.employee.id, site_id=self.site.id, status="completed",
+            checkin_time=stopped_at - timedelta(hours=1), checkout_time=stopped_at,
+            checkin_lat=0, checkin_lon=0.01, checkout_lat=0, checkout_lon=0.02,
+            checkin_selfie="missing.png", checkin_distance_m=1111.949,
+            checkout_distance_m=2223.899, checkout_location_source="current",
+            checkout_location_time=stopped_at,
+        )
+        db.session.add(visit)
+        db.session.flush()
+        db.session.add(SiteReport(
+            attendance=visit, work_performed="Display test", is_billable=True,
+            activities_completed="", issues_found="", recommendations="", materials_used="",
+            remarks="", engineer_name="Engineer", customer_representative_name="",
+            employee_signature="", customer_signature="",
+        ))
+        db.session.commit()
+        return visit
+
+    def test_pdf_and_attendance_show_both_distances_in_km_and_ist(self):
+        visit = self._completed_display_visit(datetime(2026, 10, 26, 20, tzinfo=timezone.utc))
+        self._login_admin()
+        response = self.client.get(f"/reports/{visit.id}/pdf")
+        self.assertEqual(response.status_code, 200)
+        text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(response.data)).pages)
+        for value in ("1.112 km", "2.224 km", "27 Oct 2026 00:30 IST", "27 Oct 2026 01:30 IST"):
+            self.assertIn(value, text)
+        self.assertNotIn(" UTC", text)
+        response.close()
+        history = self.client.get("/admin/attendance")
+        for value in (b"1.112 km from assigned site", b"2.224 km from assigned site",
+                      b"27 Oct 2026 00:30 IST", b"27 Oct 2026 01:30 IST"):
+            self.assertIn(value, history.data)
+        self.assertIn(b"27 Oct 2026 00:30 IST", self.client.get("/reports").data)
+        # Unknown distances remain unknown; a captured zero remains zero.
+        visit.checkin_distance_m, visit.checkout_distance_m = 0, None
+        db.session.commit()
+        response = self.client.get(f"/reports/{visit.id}/pdf")
+        text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(response.data)).pages)
+        self.assertIn("0.000 km", text)
+        self.assertIn("Not recorded", text)
+        response.close()
+        self.assertIn(b"0.000 km from assigned site", self.client.get("/admin/attendance").data)
+
+    def test_employee_pdf_downloads_are_denied_but_history_and_excel_remain(self):
+        visit = self._completed_display_visit(datetime(2026, 10, 26, 12, tzinfo=timezone.utc))
+        self._login_employee()
+        for path in ("/employee", "/reports"):
+            page = self.client.get(path)
+            self.assertEqual(page.status_code, 200)
+            self.assertNotIn(b">PDF<", page.data)
+            self.assertNotIn(b"Download PDF", page.data)
+            self.assertNotIn(b"download-combined-pdf", page.data)
+        self.assertEqual(self.client.get(f"/reports/{visit.id}/pdf").status_code, 403)
+        self.assertEqual(self.client.get("/reports/combined.pdf", query_string={
+            "start_date": "2026-10-26", "end_date": "2026-10-26",
+        }).status_code, 403)
+        response = self.client.get("/reports/activity.xlsx", query_string={
+            "site_id": self.site.id, "start_date": "2026-10-26", "end_date": "2026-10-26",
+        })
+        self.assertEqual(response.status_code, 200)
+        response.close()
+        self._login_admin()
+        self.assertIn(b"Download PDF", self.client.get("/reports").data)
+        self.assertIn(b"download-combined-pdf", self.client.get("/reports").data)
+
+    def test_po_fields_only_appear_on_invoices_not_site_catalog(self):
+        self._login_admin()
+        for path in ("/admin/sites", f"/admin/sites/{self.site.id}/edit"):
+            page = self.client.get(path)
+            self.assertNotIn(b'name="po_number"', page.data)
+            self.assertNotIn(b'name="po_date"', page.data)
+            self.assertNotIn(b'name="employee_id"', page.data)
+        page = self.client.get("/admin/invoices")
+        self.assertIn(b'name="po_number"', page.data)
+        self.assertIn(b'name="po_date"', page.data)
+
+    def test_admin_today_metrics_and_combined_pdf_use_india_date_boundaries(self):
+        stopped_at = datetime(2026, 10, 26, 20, tzinfo=timezone.utc)
+        visit = self._completed_display_visit(stopped_at)
+        self._login_admin()
+        with patch("geosite.routes.utcnow", return_value=stopped_at + timedelta(minutes=10)):
+            page = self.client.get("/admin/metrics/completed")
+            self.assertIn(b"27 Oct 2026 01:30 IST", page.data)
+            self.assertIn(b"Completed", self.client.get("/admin").data)
+            self.assertEqual(self.client.get("/api/admin/live-status").json["employees"][0]["status"], "completed")
+        included = self.client.get("/reports/combined.pdf", query_string={
+            "start_date": "2026-10-27", "end_date": "2026-10-27",
+        })
+        self.assertEqual(included.status_code, 200)
+        included.close()
+        excluded = self.client.get("/reports/combined.pdf", query_string={
+            "start_date": "2026-10-26", "end_date": "2026-10-26",
+        })
+        self.assertEqual(excluded.status_code, 302)
+        self.assertEqual(visit.checkout_time, stopped_at.replace(tzinfo=None))
+
+    def test_admin_live_checkin_times_match_ist_in_html_and_polling(self):
+        self._login_admin()
+        now = datetime.now(timezone.utc)
+        visit = Attendance(
+            employee_id=self.employee.id, site_id=self.site.id, status="onsite",
+            checkin_time=now, checkin_lat=0, checkin_lon=0, checkin_selfie="missing.png",
+        )
+        db.session.add(visit)
+        db.session.commit()
+        expected = now.astimezone(INDIA_TIME).strftime("%H:%M IST")
+        self.assertIn(expected.encode(), self.client.get("/admin").data)
+        self.assertEqual(self.client.get("/api/admin/live-status").json["employees"][0]["checkin_time"], expected)
+        self.assertIn(b"IST", self.client.get("/admin/metrics/onsite").data)
+
+    def test_completed_today_counts_and_chart_use_exact_ist_midnight_boundaries(self):
+        midnight = datetime(2026, 10, 26, 18, 30, tzinfo=timezone.utc)
+        for stopped_at in (
+            midnight - timedelta(microseconds=1),
+            midnight,
+            midnight + timedelta(days=1) - timedelta(microseconds=1),
+            midnight + timedelta(days=1),
+        ):
+            self._completed_display_visit(stopped_at)
+        self._login_admin()
+        with patch("geosite.routes.utcnow", return_value=midnight + timedelta(hours=1)):
+            with patch("geosite.routes.render_template", return_value="dashboard") as render:
+                response = self.client.get("/admin")
+                self.assertEqual(response.status_code, 200)
+                values = render.call_args.kwargs
+                self.assertEqual(values["completed_today"], 2)
+                self.assertEqual(values["chart_labels"][-1], "2026-10-27")
+                self.assertEqual(values["chart_values"][-1], 2)
+                self.assertEqual(values["chart_values"][-2], 1)
+            with patch("geosite.routes.render_template", return_value="metric") as render:
+                self.client.get("/admin/metrics/completed")
+                self.assertEqual(len(render.call_args.kwargs["rows"]), 2)
+
+    def test_login_password_toggle_is_accessible_and_not_a_submit_button(self):
+        page = self.client.get("/login")
+        self.assertIn(b'id="password" type="password"', page.data)
+        self.assertIn(b'id="toggle-password" type="button"', page.data)
+        self.assertIn(b'aria-label="Show password" aria-pressed="false"', page.data)
+
     def test_admin_assigns_multiple_sites_without_replacing_existing_assignments(self):
         self._login_admin()
         response = self.client.post("/admin/sites", data=self._site_payload(), follow_redirects=True)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(AssignedSite.query.filter_by(employee_id=self.employee.id, is_active=True).count(), 2)
+        second = AssignedSite.query.filter_by(site_name="South Site").one()
+        self.assertEqual(SiteAssignment.query.filter_by(employee_id=self.employee.id, is_active=True).count(), 1)
+        self.client.post("/admin/assignments", data={
+            "employee_id": self.employee.id, "site_ids": [self.site.id, second.id],
+        })
+        self.assertEqual(SiteAssignment.query.filter_by(employee_id=self.employee.id, is_active=True).count(), 2)
         db.session.refresh(self.site)
         self.assertEqual(self.site.site_name, "North Site")
         self.assertEqual(self.site.latitude, 0)
@@ -625,7 +773,7 @@ class WorkflowTests(unittest.TestCase):
         url = f"/admin/sites/{second.id}/edit"
         form = self.client.get(url)
         self.assertEqual(form.status_code, 200)
-        for value in (b'value="South Site"', b'value="19.0"', b'Project Two', b'PO-200',
+        for value in (b'value="South Site"', b'value="19.0"', b'Project Two',
                       b'Reporting Co', b'First\nSecond', b'Save changes'):
             self.assertIn(value, form.data)
         response = self.client.post(url, data=self._site_payload(
@@ -659,7 +807,8 @@ class WorkflowTests(unittest.TestCase):
             client.post("/admin/sites", data=self._site_payload())
         db.session.refresh(self.site)
         self.assertEqual(self.site.site_name, "North Site")
-        self.assertEqual(AssignedSite.query.filter_by(employee_id=self.employee.id, is_active=True).count(), 2)
+        self.assertEqual(AssignedSite.query.filter_by(is_active=True).count(), 2)
+        self.assertEqual(SiteAssignment.query.filter_by(employee_id=self.employee.id, is_active=True).count(), 1)
         db.session.refresh(visit)
         self.assertEqual(visit.status, "onsite")
 
@@ -673,11 +822,9 @@ class WorkflowTests(unittest.TestCase):
         db.session.commit()
         url = f"/admin/sites/{self.site.id}/edit"
         response = self.client.post(url, data=self._site_payload(employee_id=str(other.id)), follow_redirects=True)
-        self.assertIn(b"engineer cannot be changed", response.data)
+        self.assertEqual(response.status_code, 200)
         db.session.refresh(self.site)
-        self.assertEqual(self.site.employee_id, self.employee.id)
-        self.assertEqual(self.site.site_name, "North Site")
-        self.client.post(url, data=self._site_payload())
+        self.assertEqual(SiteAssignment.query.filter_by(site_id=self.site.id).one().employee_id, self.employee.id)
         db.session.refresh(self.site)
         self.assertEqual(self.site.site_name, "South Site")
         self.assertEqual((self.site.latitude, self.site.longitude), (19, 72))
@@ -686,20 +833,20 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual((visit.site_latitude, visit.site_longitude, visit.checkin_distance_m, visit.checkout_distance_m), snapshots)
         self.assertEqual(visit.employee_id, self.employee.id)
 
-    def test_assignment_without_history_can_move_to_another_active_engineer(self):
+    def test_site_edit_cannot_change_engineer_access(self):
         self._login_admin()
         other = User(name="Other", email="other@example.com", mobile="3", password_hash="test")
         db.session.add(other)
         db.session.commit()
         self.client.post(f"/admin/sites/{self.site.id}/edit", data=self._site_payload(employee_id=str(other.id)))
         db.session.refresh(self.site)
-        self.assertEqual(self.site.employee_id, other.id)
+        self.assertEqual(SiteAssignment.query.filter_by(site_id=self.site.id).one().employee_id, self.employee.id)
         self.assertEqual(AssignedSite.query.count(), 1)
 
-    def test_invoice_history_prevents_reassignment_but_allows_detail_edits(self):
+    def test_invoice_history_retains_engineer_when_shared_site_is_edited(self):
         self._login_admin()
         self.client.post("/admin/invoices", data={
-            "site_id": self.site.id, "customer_name": "Example Customer",
+            "site_id": self.site.id, "employee_id": self.employee.id, "customer_name": "Example Customer",
             "description": "Service", "start_date": "2026-10-10", "end_date": "2026-10-10",
             "billable_days": "1", "daily_rate": "100", "currency": "INR",
         })
@@ -709,11 +856,11 @@ class WorkflowTests(unittest.TestCase):
         db.session.commit()
         url = f"/admin/sites/{self.site.id}/edit"
         response = self.client.post(url, data=self._site_payload(employee_id=str(other.id)), follow_redirects=True)
-        self.assertIn(b"engineer cannot be changed", response.data)
+        self.assertEqual(response.status_code, 200)
         self.client.post(url, data=self._site_payload())
         db.session.refresh(self.site)
         self.assertEqual(self.site.site_name, "South Site")
-        self.assertEqual(self.site.employee_id, self.employee.id)
+        self.assertEqual(SiteAssignment.query.filter_by(site_id=self.site.id).one().employee_id, self.employee.id)
         self.assertEqual(Invoice.query.one().customer_name, "Example Customer")
         self.assertEqual(Invoice.query.one().site_id, self.site.id)
         self.assertEqual(Invoice.query.one().employee_id, self.employee.id)
@@ -722,8 +869,8 @@ class WorkflowTests(unittest.TestCase):
         self._login_admin()
         url = f"/admin/sites/{self.site.id}/edit"
         for payload in (self._site_payload(latitude="91"), self._site_payload(longitude="nan"),
-                        self._site_payload(allowed_radius="0"), self._site_payload(employee_id="999"),
-                        self._site_payload(site_name="x" * 161), self._site_payload(po_date="bad")):
+                        self._site_payload(allowed_radius="0"),
+                        self._site_payload(site_name="x" * 161), self._site_payload(project_name="x" * 251)):
             response = self.client.post(url, data=payload)
             self.assertEqual(response.status_code, 200)
             self.assertIn(b"Enter valid site details", response.data)
@@ -744,6 +891,191 @@ class WorkflowTests(unittest.TestCase):
         self._login_admin()
         self.assertEqual(self.client.get("/admin/sites/999/edit").status_code, 404)
 
+    def test_shared_catalog_site_can_be_assigned_to_multiple_engineers_without_copying(self):
+        self._login_admin()
+        other = User(name="Other", email="other@example.com", mobile="3")
+        other.set_password("other-password-123")
+        db.session.add(other)
+        db.session.commit()
+        for _ in range(2):
+            response = self.client.post("/admin/assignments", data={
+                "employee_id": other.id, "site_ids": [self.site.id],
+            }, follow_redirects=True)
+            self.assertIn(b"Engineer site assignments saved", response.data)
+        self.assertEqual(AssignedSite.query.count(), 1)
+        self.assertEqual(SiteAssignment.query.filter_by(site_id=self.site.id, is_active=True).count(), 2)
+        self.assertEqual(SiteAssignment.query.filter_by(employee_id=other.id, site_id=self.site.id).count(), 1)
+        self.assertIn(b"Engineer, Other", self.client.get("/admin/sites").data)
+        with self.app.app_context():
+            client = self.app.test_client()
+            client.post("/login", data={"email": other.email, "password": "other-password-123"})
+            self.assertIn(b"North Site", client.get("/employee").data)
+            self.assertEqual(client.post(
+                f"/api/visit/{self.site.id}/verify-checkin", json={"latitude": 0, "longitude": 0}
+            ).status_code, 200)
+            client.post(f"/visit/{self.site.id}/checkin", data={"selfie": self._image_data()})
+        visit = Attendance.query.one()
+        self.assertEqual(visit.employee_id, other.id)
+        self.assertEqual(visit.site_id, self.site.id)
+
+    def test_unassign_and_reassign_preserve_history_without_new_site_or_membership(self):
+        visit = self._completed_display_visit(datetime(2026, 10, 26, 12, tzinfo=timezone.utc))
+        self._login_admin()
+        self.client.post("/admin/assignments", data={"employee_id": self.employee.id})
+        self.assertFalse(SiteAssignment.query.one().is_active)
+        self.assertEqual(Attendance.query.one().id, visit.id)
+        self.client.post("/logout")
+        self._login_employee()
+        self.assertNotIn(b"Start site visit", self.client.get("/employee").data)
+        self.assertEqual(self.client.post(
+            f"/api/visit/{self.site.id}/verify-checkin", json={"latitude": 0, "longitude": 0}
+        ).status_code, 404)
+        export = self.client.get("/reports/activity.xlsx", query_string={
+            "site_id": self.site.id, "start_date": "2026-10-26", "end_date": "2026-10-26",
+        })
+        self.assertEqual(export.status_code, 200)
+        self.assertIn("Display test", str(list(load_workbook(io.BytesIO(export.data)).active.values)))
+        self._login_admin()
+        self.client.post("/admin/assignments", data={"employee_id": self.employee.id, "site_ids": [self.site.id]})
+        self.assertTrue(SiteAssignment.query.one().is_active)
+        self.assertEqual(AssignedSite.query.count(), 1)
+
+    def test_unassign_active_visit_is_rejected_atomically(self):
+        self._start_location_visit()
+        second = AssignedSite(site_name="Extra", customer_name="Customer", address="Address",
+                              latitude=1, longitude=1, allowed_radius=100)
+        db.session.add(second)
+        db.session.commit()
+        with self.app.app_context():
+            client = self.app.test_client()
+            client.post("/login", data={"email": self.admin.email, "password": "admin-password-123"})
+            response = client.post("/admin/assignments", data={
+                "employee_id": self.employee.id, "site_ids": [second.id],
+            }, follow_redirects=True)
+            self.assertIn(b"No assignments were changed", response.data)
+        db.session.expire_all()
+        self.assertEqual(SiteAssignment.query.count(), 1)
+        self.assertTrue(SiteAssignment.query.one().is_active)
+
+    def test_assignment_input_and_roles_are_validated(self):
+        self._login_employee()
+        self.assertEqual(self.client.get("/admin/assignments").status_code, 403)
+        self.assertEqual(self.client.post("/admin/assignments", data={
+            "employee_id": self.employee.id, "site_ids": [self.site.id],
+        }).status_code, 403)
+        self._login_admin()
+        for payload, status in (
+            ({}, 400), ({"employee_id": "bad"}, 400),
+            ({"employee_id": self.admin.id}, 404),
+            ({"employee_id": self.employee.id, "site_ids": ["bad"]}, 400),
+            ({"employee_id": self.employee.id, "site_ids": ["999"]}, 400),
+        ):
+            self.assertEqual(self.client.post("/admin/assignments", data=payload).status_code, status)
+        self.assertTrue(SiteAssignment.query.one().is_active)
+        self.assertEqual(SiteAssignment.query.count(), 1)
+        self.site.is_active = False
+        db.session.commit()
+        self.assertEqual(self.client.post("/admin/assignments", data={
+            "employee_id": self.employee.id, "site_ids": [self.site.id],
+        }).status_code, 400)
+        self.app.config["WTF_CSRF_ENABLED"] = True
+        self.assertEqual(self.client.post("/admin/assignments", data={"employee_id": self.employee.id}).status_code, 400)
+
+    def test_shared_site_excel_isolates_each_engineers_activities_leaves_and_header(self):
+        visit = self._completed_display_visit(datetime(2026, 10, 26, 12, tzinfo=timezone.utc))
+        other = User(name="Other", email="other@example.com", mobile="3", password_hash="test")
+        db.session.add(other)
+        db.session.flush()
+        db.session.add(SiteAssignment(employee=other, site=self.site))
+        other_visit = Attendance(
+            employee_id=other.id, site_id=self.site.id, status="completed",
+            checkin_lat=0, checkin_lon=0, checkin_selfie="missing.png",
+            checkout_time=datetime(2026, 10, 26, 13, tzinfo=timezone.utc),
+        )
+        db.session.add(other_visit)
+        db.session.flush()
+        db.session.add(SiteReport(
+            attendance=other_visit, work_performed="Other private work", is_billable=True,
+            activities_completed="", issues_found="", recommendations="", materials_used="",
+            remarks="", engineer_name="Other", customer_representative_name="",
+            employee_signature="", customer_signature="",
+        ))
+        db.session.add(LeaveRequest(
+            employee_id=other.id, start_date=date(2026, 10, 26), end_date=date(2026, 10, 26),
+            period="full", reason="Other private leave", status="approved",
+        ))
+        db.session.commit()
+        self._login_employee()
+        params = {"site_id": self.site.id, "employee_id": other.id,
+                  "start_date": "2026-10-26", "end_date": "2026-10-26"}
+        response = self.client.get("/reports/activity.xlsx", query_string=params)
+        sheet = load_workbook(io.BytesIO(response.data)).active
+        values = str(list(sheet.values))
+        self.assertIn("ENGINEER : Engineer", values)
+        self.assertIn("Display test", values)
+        self.assertNotIn("Other private", values)
+        self.assertNotIn("PO NO", values)
+        self.assertNotIn("PO DATE", values)
+        self._login_admin()
+        response = self.client.get("/reports/activity.xlsx", query_string=params)
+        values = str(list(load_workbook(io.BytesIO(response.data)).active.values))
+        self.assertIn("ENGINEER : Other", values)
+        self.assertIn("Other private work", values)
+        self.assertIn("Other private leave", values)
+        self.assertNotIn("Display test", values)
+
+    def test_invoice_po_is_manual_optional_validated_and_not_taken_from_site(self):
+        self._login_admin()
+        payload = {
+            "site_id": self.site.id, "employee_id": self.employee.id,
+            "customer_name": "Customer", "description": "Service",
+            "start_date": "2026-10-26", "end_date": "2026-10-26", "billable_days": "1",
+            "daily_rate": "100", "currency": "INR", "po_number": "MANUAL-42", "po_date": "2026-10-01",
+        }
+        self.client.post("/admin/invoices", data=payload)
+        invoice = Invoice.query.one()
+        self.assertEqual(invoice.po_number, "MANUAL-42")
+        self.assertEqual(invoice.po_date, date(2026, 10, 1))
+        response = self.client.get(f"/admin/invoices/{invoice.id}/pdf")
+        text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(response.data)).pages)
+        self.assertIn("MANUAL-42", text)
+        self.assertIn("2026-10-01", text)
+        response.close()
+        for updates in ({"po_date": "bad"}, {"po_number": "x" * 121},
+                        {"employee_id": self.admin.id}, {"employee_id": ""}, {"site_id": 999}):
+            self.client.post("/admin/invoices", data={**payload, **updates})
+            self.assertEqual(Invoice.query.count(), 1)
+        self.client.post("/admin/invoices", data={**payload, "po_number": "", "po_date": ""})
+        self.assertEqual(Invoice.query.count(), 2)
+        blank = Invoice.query.order_by(Invoice.id.desc()).first()
+        self.assertEqual(blank.po_number, "")
+        self.assertIsNone(blank.po_date)
+        other = User(name="Other", email="other@example.com", mobile="3", password_hash="test")
+        db.session.add(other)
+        db.session.commit()
+        self.client.post("/admin/invoices", data={**payload, "employee_id": other.id})
+        self.assertEqual(Invoice.query.count(), 2)
+        self.client.post("/admin/assignments", data={"employee_id": other.id, "site_ids": [self.site.id]})
+        self.client.post("/admin/invoices", data={**payload, "employee_id": other.id, "po_number": "OTHER-PO"})
+        latest = Invoice.query.order_by(Invoice.id.desc()).first()
+        self.assertEqual(latest.employee_id, other.id)
+        self.assertEqual(latest.site_id, self.site.id)
+        self.assertEqual(latest.po_number, "OTHER-PO")
+
+    def test_deleting_engineer_without_visit_history_keeps_shared_catalog_site(self):
+        other = User(name="Other", email="other@example.com", mobile="3", password_hash="test")
+        db.session.add(other)
+        db.session.flush()
+        db.session.add(SiteAssignment(employee=other, site=self.site))
+        db.session.commit()
+        other_id = other.id
+        self._login_admin()
+        self.client.post(f"/admin/employees/{other_id}/delete")
+        self.assertIsNone(db.session.get(User, other_id))
+        self.assertIsNotNone(db.session.get(AssignedSite, self.site.id))
+        self.assertEqual(SiteAssignment.query.filter_by(site_id=self.site.id).count(), 1)
+        self.assertEqual(SiteAssignment.query.one().employee_id, self.employee.id)
+
     def test_admin_invoices_use_days_times_daily_rate(self):
         self.client.post(
             "/login",
@@ -753,6 +1085,7 @@ class WorkflowTests(unittest.TestCase):
             "/admin/invoices",
             data={
                 "site_id": self.site.id,
+                "employee_id": self.employee.id,
                 "customer_name": "Example Customer",
                 "description": "Engineering service",
                 "start_date": "2026-10-10",

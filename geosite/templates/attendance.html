@@ -4,19 +4,19 @@
 {% macro location(latitude, longitude, distance=none, captured_at=none) %}
   {% if latitude is not none and longitude is not none %}
   <a target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps/search/?api=1&amp;query={{ latitude }},{{ longitude }}">{{ "%.5f"|format(latitude) }}, {{ "%.5f"|format(longitude) }}</a>
-  {% if distance is not none %}<div class="small">{{ "%.1f"|format(distance) }} m from assigned site</div>{% endif %}
-  {% if captured_at %}<div class="small text-secondary">Captured {{ captured_at.strftime("%d %b %Y %H:%M:%S UTC") }}</div>{% endif %}
+  {% if distance is not none %}<div class="small">{{ "%.3f"|format(distance / 1000) }} km from assigned site</div>{% endif %}
+  {% if captured_at %}<div class="small text-secondary">Captured {{ captured_at|ist("%d %b %Y %H:%M:%S IST") }}</div>{% endif %}
   {% else %}Location unavailable{% endif %}
 {% endmacro %}
 <div class="page-heading"><div><p class="eyebrow">AUDIT &amp; ATTENDANCE</p><h1>Attendance history</h1><p class="text-secondary mb-0">Site visit records and account access events.</p></div></div>
 <section class="panel-card mb-4"><div class="section-title"><div><p class="eyebrow">SITE VISITS</p><h2>Attendance records</h2></div></div>
-  <p class="small text-secondary">Forgotten visits stop at 23:59 Asia/Kolkata (India). Times below are UTC. Last-known locations show when they were actually captured, not a fresh GPS fix at stop time. Historical distances not recorded before this update are left blank.</p>
-  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Employee</th><th>Site</th><th>Assigned location at start</th><th>Check-in (UTC)</th><th>Check-out (UTC)</th><th>Start location / distance</th><th>Last captured location</th><th>Stop location / distance</th><th>Status</th></tr></thead>
+  <p class="small text-secondary">Forgotten visits stop at 23:59 Asia/Kolkata (India). Times below are IST (UTC+05:30); distances are in km. Last-known locations show when they were actually captured, not a fresh GPS fix at stop time. Historical distances not recorded before this update are left blank.</p>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Employee</th><th>Site</th><th>Assigned location at start</th><th>Check-in (IST)</th><th>Check-out (IST)</th><th>Start location / distance (km)</th><th>Last captured location</th><th>Stop location / distance (km)</th><th>Status</th></tr></thead>
     <tbody>{% for row in attendance %}<tr>
       <td>{{ row.employee.name }}</td><td>{{ row.site.site_name }}</td>
       <td>{{ location(row.site_latitude, row.site_longitude) }}</td>
-      <td>{{ row.checkin_time.strftime("%d %b %Y %H:%M") }}</td>
-      <td>{{ row.checkout_time.strftime("%d %b %Y %H:%M") if row.checkout_time else "—" }}{% if row.auto_closed %}<div class="small">Auto-stopped (23:59 India)</div>{% endif %}</td>
+      <td>{{ row.checkin_time|ist }}</td>
+      <td>{{ row.checkout_time|ist if row.checkout_time else "—" }}{% if row.auto_closed %}<div class="small">Auto-stopped (23:59 India)</div>{% endif %}</td>
       <td>{{ location(row.checkin_lat, row.checkin_lon, row.checkin_distance_m, row.checkin_location_time) }}</td>
       <td>{{ location(row.last_location_lat, row.last_location_lon, captured_at=row.last_location_time) }}</td>
       <td>{% if row.checkout_time %}{{ location(row.checkout_lat, row.checkout_lon, row.checkout_distance_m, row.checkout_location_time) }}
@@ -30,7 +30,7 @@
 </section>
 <section class="panel-card"><div class="section-title"><div><p class="eyebrow">ACCESS LOG</p><h2>Login / logout events</h2></div></div>
   <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Time</th><th>User</th><th>Action</th><th>IP address</th><th>Details</th></tr></thead>
-    <tbody>{% for log in audit_logs %}<tr><td>{{ log.created_at.strftime("%d %b %Y · %H:%M:%S") }}</td><td>{{ log.user.name if log.user else "System" }}</td><td>{{ log.action|replace("_"," ")|title }}</td><td>{{ log.ip_address or "—" }}</td><td>{{ log.details or "—" }}</td></tr>
+    <tbody>{% for log in audit_logs %}<tr><td>{{ log.created_at|ist("%d %b %Y %H:%M:%S IST") }}</td><td>{{ log.user.name if log.user else "System" }}</td><td>{{ log.action|replace("_"," ")|title }}</td><td>{{ log.ip_address or "—" }}</td><td>{{ log.details or "—" }}</td></tr>
     {% else %}<tr><td colspan="5" class="empty-state">No audit events recorded.</td></tr>{% endfor %}</tbody>
   </table></div>
 </section>

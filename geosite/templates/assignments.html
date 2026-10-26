@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Assign sites{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">ENGINEER ACCESS</p><h1>Assign sites</h1><p class="text-secondary">Select an engineer, then tick their sites. A site can be shared by multiple engineers without copying its details.</p></div><a class="btn btn-outline-primary" href="{{ url_for('main.sites') }}">Site catalog</a></div>
+<section class="panel-card">
+  <form method="get" class="mb-4">
+    <label class="form-label" for="assignment-engineer">Engineer</label>
+    <select class="form-select mb-2" id="assignment-engineer" name="employee_id" required>
+      <option value="">Select engineer</option>
+      {% for employee in employees %}<option value="{{ employee.id }}" {% if selected_employee and employee.id == selected_employee.id %}selected{% endif %}>{{ employee.name }} - {{ employee.email }}</option>{% endfor %}
+    </select>
+    <button class="btn btn-outline-primary">Load assignments</button>
+  </form>
+  {% if selected_employee %}
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="employee_id" value="{{ selected_employee.id }}">
+    <h2 class="h4">Sites for {{ selected_employee.name }}</h2>
+    <p class="small text-secondary">Untick to remove future access; previous visits and reports are retained. An active visit must be stopped before its site can be unticked.</p>
+    {% for site in sites %}
+    <label class="d-flex gap-3 align-items-start py-3 border-bottom">
+      <input class="form-check-input mt-1" type="checkbox" name="site_ids" value="{{ site.id }}" {% if site.id in selected_sites %}checked{% endif %}>
+      <span><strong>{{ site.site_name }}</strong><br>{{ site.customer_name }}<br><span class="small text-secondary">{{ site.address }}</span></span>
+    </label>
+    {% else %}<p>No sites yet. Add a site in the site catalog first.</p>{% endfor %}
+    <button class="btn btn-primary mt-3">Save assignments</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

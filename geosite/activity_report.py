@@ -8,7 +8,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 
-def activity_workbook(site, visits, leaves, start, end):
+def activity_workbook(site, visits, leaves, start, end, employee):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "SAR-R0"
@@ -31,11 +31,9 @@ def activity_workbook(site, visits, leaves, start, end):
     sheet["A1"].alignment = Alignment(horizontal="center", vertical="center")
     merged(3, 1, 12, f"PROJECT : {site.project_name or 'Not specified'}")
     merged(4, 1, 12, f"CUSTOMER : {site.customer_name}")
-    merged(5, 1, 6, f"PO NO : {site.po_number or 'Not specified'}")
-    merged(5, 7, 12, f"REPORT UPDATE DATE : {datetime.now(timezone.utc):%d %b %Y}")
-    merged(6, 1, 6, f"PO DATE : {site.po_date.strftime('%d %b %Y') if site.po_date else 'Not specified'}")
-    merged(6, 7, 12, f"SITE DETAIL : {site.site_name}")
-    merged(7, 1, 12, f"ENGINEER : {site.employee.name}")
+    merged(5, 1, 12, f"REPORT UPDATE DATE : {datetime.now(timezone.utc):%d %b %Y}")
+    merged(6, 1, 12, f"SITE DETAIL : {site.site_name}")
+    merged(7, 1, 12, f"ENGINEER : {employee.name}")
     for column, label in enumerate(("SR NO", "SITE", "DATE", "DAY", "ACTIVITY DETAIL"), 1):
         text(sheet.cell(8, column), label)
     sheet.merge_cells("E8:L8")
@@ -97,7 +95,7 @@ def activity_workbook(site, visits, leaves, start, end):
     for first, last, label in (
         (1, 4, f"Commissioning Manager : {site.commissioning_manager or '____________________'}"),
         (5, 8, f"Project Manager : {site.project_manager or '____________________'}"),
-        (9, 12, f"Engineer : {site.employee.name}"),
+        (9, 12, f"Engineer : {employee.name}"),
     ):
         sheet.merge_cells(
             start_row=signature_start, start_column=first,

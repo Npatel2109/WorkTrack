@@ -1,14 +1,25 @@
 import base64
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from PIL import Image
 
 from geosite.services import haversine_distance, save_data_image
+from geosite.timeutils import format_ist, india_date
 
 
 class GeoServiceTests(unittest.TestCase):
+    def test_india_time_handles_naive_utc_aware_utc_and_non_utc_dates(self):
+        utc = datetime(2026, 10, 26, 20, 0, tzinfo=timezone.utc)
+        expected = "27 Oct 2026 01:30 IST"
+        for value in (utc, utc.replace(tzinfo=None),
+                      utc.astimezone(timezone(timedelta(hours=-4)))):
+            self.assertEqual(format_ist(value), expected)
+            self.assertEqual(india_date(value).isoformat(), "2026-10-27")
+        self.assertEqual(format_ist(None), "-")
+
     def test_haversine_zero_and_known_distance(self):
         self.assertEqual(haversine_distance(0, 0, 0, 0), 0)
         distance = haversine_distance(0, 0, 0, 0.001)

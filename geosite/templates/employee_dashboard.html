@@ -16,7 +16,7 @@
   <div class="section-title"><div><p class="eyebrow">REPORTS TO COMPLETE</p><h2>Stopped visits - report pending</h2></div></div>
   {% for visit in pending_visits %}
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 py-2 border-bottom">
-    <div><strong>{{ visit.site.site_name }}</strong><div class="small text-secondary">{{ "Auto-stopped at the daily 23:59 India cutoff" if visit.auto_closed else "Visit stopped" }}: {{ visit.checkout_time.strftime("%d %b %Y %H:%M UTC") }}</div></div>
+    <div><strong>{{ visit.site.site_name }}</strong><div class="small text-secondary">{{ "Auto-stopped at the daily 23:59 India cutoff" if visit.auto_closed else "Visit stopped" }}: {{ visit.checkout_time|ist }}</div></div>
     <a class="btn btn-outline-primary" href="{{ url_for('main.site_report_form', attendance_id=visit.id) }}">Complete report</a>
   </div>
   {% endfor %}
@@ -25,7 +25,7 @@
 {% if active_attendance %}
 <section class="active-visit-card mb-4">
   <div class="active-visit-top"><div><span class="eyebrow text-white-50">CURRENT VISIT</span><h2>{{ active_attendance.site.site_name }}</h2><p>{{ active_attendance.site.customer_name }} · {{ active_attendance.site.address }}</p></div><span class="status-pill onsite">ONSITE</span></div>
-  <div class="active-visit-bottom"><div><span class="small text-white-50">Checked in</span><div class="fw-semibold">{{ active_attendance.checkin_time.strftime("%d %b %Y · %H:%M UTC") }}</div></div><a class="btn btn-warning btn-lg" href="{{ url_for('main.checkout_location', attendance_id=active_attendance.id) }}">End site visit</a></div>
+  <div class="active-visit-bottom"><div><span class="small text-white-50">Checked in</span><div class="fw-semibold">{{ active_attendance.checkin_time|ist }}</div></div><a class="btn btn-warning btn-lg" href="{{ url_for('main.checkout_location', attendance_id=active_attendance.id) }}">End site visit</a></div>
 </section>
 {% else %}
 <div class="row g-3 mb-4">{% for site in sites %}
@@ -36,9 +36,9 @@
 {% else %}<div class="col-12"><div class="panel-card empty-state py-5"><div class="empty-icon">⌖</div><h2>No site assigned yet</h2><p>Your administrator will assign your site location.</p></div></div>{% endfor %}</div>
 {% endif %}
 <section class="panel-card"><div class="section-title"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>My completed visits</h2></div><a href="{{ url_for('main.reports') }}">All reports</a></div>
-  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Site</th><th>Customer</th><th>Check-in</th><th>Completed</th><th>Report</th></tr></thead>
-    <tbody>{% for attendance in reports %}<tr><td class="fw-semibold">{{ attendance.site.site_name }}</td><td>{{ attendance.site.customer_name }}</td><td>{{ attendance.checkin_time.strftime("%d %b %Y %H:%M") }}</td><td>{{ attendance.checkout_time.strftime("%d %b %Y %H:%M") }}</td><td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.download_pdf', attendance_id=attendance.id) }}">PDF</a></td></tr>
-    {% else %}<tr><td colspan="5" class="empty-state">Completed visits and reports will appear here.</td></tr>{% endfor %}</tbody>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Site</th><th>Customer</th><th>Check-in (IST)</th><th>Completed (IST)</th></tr></thead>
+    <tbody>{% for attendance in reports %}<tr><td class="fw-semibold">{{ attendance.site.site_name }}</td><td>{{ attendance.site.customer_name }}</td><td>{{ attendance.checkin_time|ist }}</td><td>{{ attendance.checkout_time|ist }}</td></tr>
+    {% else %}<tr><td colspan="4" class="empty-state">Completed visits and reports will appear here.</td></tr>{% endfor %}</tbody>
   </table></div>
 </section>
 {% endblock %}

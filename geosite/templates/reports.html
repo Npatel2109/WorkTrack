@@ -8,24 +8,24 @@
     {% if current_user.is_admin %}
     <div class="col-md-4"><label class="form-label" for="activity-employee">Employee</label><select class="form-select" id="activity-employee" name="employee_id" required><option value="">Select employee</option>{% for employee in activity_employees %}<option value="{{ employee.id }}">{{ employee.name }} - {{ employee.email }}{{ ' (inactive)' if not employee.is_active else '' }}</option>{% endfor %}</select></div>
     {% endif %}
-    <div class="col-md-4"><label class="form-label" for="activity-site">Site</label><select class="form-select" id="activity-site" name="site_id" required><option value="">Select site</option>{% for site in activity_sites %}<option value="{{ site.id }}" data-employee-id="{{ site.employee_id }}">{{ site.site_name }} - {{ site.employee.name }}{{ ' (archived)' if not site.is_active else '' }}</option>{% endfor %}</select></div>
+    <div class="col-md-4"><label class="form-label" for="activity-site">Site</label><select class="form-select" id="activity-site" name="site_id" required><option value="">Select site</option>{% for site in activity_sites %}<option value="{{ site.id }}" data-employee-ids="{{ site_employee_ids[site.id]|join(',') }}">{{ site.site_name }}{{ ' (archived)' if not site.is_active else '' }}</option>{% endfor %}</select></div>
     <div class="col-md-3"><label class="form-label" for="activity-start">From date</label><input class="form-control" id="activity-start" type="date" name="start_date" required></div>
     <div class="col-md-3"><label class="form-label" for="activity-end">To date</label><input class="form-control" id="activity-end" type="date" name="end_date" required></div>
     <div class="col-md-2"><button class="btn btn-primary w-100">Download Excel</button></div>
   </form>
-  <div class="row g-3 align-items-end mb-4">
-    <div class="col-lg"><p class="eyebrow mb-1">COMBINED PDF DOWNLOAD</p><div class="small text-secondary">Choose dates to combine matching reports into one PDF.</div></div>
+  {% if current_user.is_admin %}<div class="row g-3 align-items-end mb-4">
+    <div class="col-lg"><p class="eyebrow mb-1">COMBINED PDF DOWNLOAD</p><div class="small text-secondary">Choose checkout dates in India time (IST) to combine matching reports into one PDF.</div></div>
     <div class="col-md-3"><label class="form-label" for="start-date">From date</label><input class="form-control" id="start-date" type="date" required></div>
     <div class="col-md-3"><label class="form-label" for="end-date">To date</label><input class="form-control" id="end-date" type="date" required></div>
     <div class="col-md-auto"><button class="btn btn-primary" id="download-combined-pdf" type="button">Download merged PDF</button></div>
-  </div>
-  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Engineer</th><th>Customer / site</th><th>Check-in</th><th>Check-out</th><th>Selfie</th><th>Report</th></tr></thead>
+  </div>{% endif %}
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Engineer</th><th>Customer / site</th><th>Check-in (IST)</th><th>Check-out (IST)</th><th>Selfie</th>{% if current_user.is_admin %}<th>Report</th>{% endif %}</tr></thead>
     <tbody>{% for item in reports %}<tr>
       <td><div class="fw-semibold">{{ item.employee.name }}</div><div class="small text-secondary">{{ item.employee.email }}</div></td>
       <td>{{ item.site.customer_name }}<div class="small text-secondary">{{ item.site.site_name }}</div><span class="small">{{ ('Billable' if item.report.is_billable else 'Non-billable') if item.report and item.report.is_billable is not none else 'Billing not recorded' }}</span></td>
-      <td>{{ item.checkin_time.strftime("%d %b %Y · %H:%M") }}</td><td>{{ item.checkout_time.strftime("%d %b %Y · %H:%M") if item.checkout_time else "—" }}</td>
-      <td><a href="{{ url_for('main.media', filename=item.checkin_selfie) }}" target="_blank" rel="noopener noreferrer">View selfie</a></td><td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.download_pdf', attendance_id=item.id) }}">Download PDF</a></td>
-    </tr>{% else %}<tr><td colspan="6" class="empty-state">No completed reports yet.</td></tr>{% endfor %}</tbody>
+      <td>{{ item.checkin_time|ist }}</td><td>{{ item.checkout_time|ist if item.checkout_time else "—" }}</td>
+      <td><a href="{{ url_for('main.media', filename=item.checkin_selfie) }}" target="_blank" rel="noopener noreferrer">View selfie</a></td>{% if current_user.is_admin %}<td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.download_pdf', attendance_id=item.id) }}">Download PDF</a></td>{% endif %}
+    </tr>{% else %}<tr><td colspan="{{ 6 if current_user.is_admin else 5 }}" class="empty-state">No completed reports yet.</td></tr>{% endfor %}</tbody>
   </table></div>
 </section>
 {% endblock %}
@@ -37,7 +37,7 @@ const activitySite = document.getElementById("activity-site");
 const filterActivitySites = () => {
   for (const option of activitySite.options) {
     if (!option.value) continue;
-    option.hidden = option.dataset.employeeId !== activityEmployee.value;
+    option.hidden = !option.dataset.employeeIds.split(",").includes(activityEmployee.value);
     option.disabled = option.hidden;
   }
   if (activitySite.selectedOptions[0]?.disabled) activitySite.value = "";
@@ -45,7 +45,6 @@ const filterActivitySites = () => {
 };
 activityEmployee.addEventListener("change", filterActivitySites);
 filterActivitySites();
-{% endif %}
 document.getElementById("download-combined-pdf").addEventListener("click", () => {
   const start = document.getElementById("start-date");
   const end = document.getElementById("end-date");
@@ -54,5 +53,6 @@ document.getElementById("download-combined-pdf").addEventListener("click", () =>
   const params = new URLSearchParams({ start_date: start.value, end_date: end.value });
   window.location.assign(`{{ url_for('main.download_combined_reports') }}?${params}`);
 });
+{% endif %}
 </script>
 {% endblock %}

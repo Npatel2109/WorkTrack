@@ -46,11 +46,6 @@ def create_app(test_config=None):
         ANDROID_APK_PATH=str(Path(app.instance_path) / "downloads" / "worktrack.apk"),
         # Must match AppConfig.SERVER in the Android app.
         ANDROID_SERVER_URL="http://worktrack.blackpurple.in",
-        CLOUDFLARED_PATH=os.environ.get(
-            "CLOUDFLARED_PATH", str(Path(app.instance_path) / "tools" / "cloudflared.exe")
-            if os.name == "nt" else "cloudflared"
-        ),
-        TUNNEL_ORIGIN="http://127.0.0.1:5000",
     )
     if app.config["SQLALCHEMY_DATABASE_URI"].startswith("postgres://"):
         app.config["SQLALCHEMY_DATABASE_URI"] = app.config[
@@ -66,11 +61,6 @@ def create_app(test_config=None):
     if os.environ.get("TRUST_PROXY", "0") == "1":
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
-    from .tunnel import QuickTunnel
-
-    app.extensions["quick_tunnel"] = QuickTunnel(
-        app.config["CLOUDFLARED_PATH"], app.config["TUNNEL_ORIGIN"], app.logger
-    )
     Path(app.instance_path).mkdir(parents=True, exist_ok=True)
     Path(app.config["UPLOAD_FOLDER"]).mkdir(parents=True, exist_ok=True)
     db.init_app(app)
@@ -82,6 +72,9 @@ def create_app(test_config=None):
     from .routes import bp
 
     app.register_blueprint(bp)
+    from .timeutils import format_ist
+
+    app.add_template_filter(format_ist, "ist")
     login_manager.login_view = "main.login"
     login_manager.login_message_category = "warning"
 

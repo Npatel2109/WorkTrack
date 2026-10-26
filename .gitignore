@@ -10,3 +10,4 @@ migrations/versions/__pycache__/
 android/build/
 *.keystore
 *.jks
+*.pem

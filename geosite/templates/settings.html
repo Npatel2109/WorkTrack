@@ -2,25 +2,6 @@
 {% block title %}App settings{% endblock %}
 {% block content %}
 <div class="page-heading"><div><p class="eyebrow">ADMINISTRATION</p><h1>App settings</h1></div></div>
-<section class="panel-card mb-4">
-  <div class="section-title"><h2>Temporary global access</h2></div>
-  <p class="text-secondary">Create a free Cloudflare HTTPS link for admins and employees. Your normal login and role permissions still apply. Keep this PC, WorkTrack and the tunnel running.</p>
-  <div class="alert alert-warning">Testing only, not permanent hosting. Anyone on the internet can reach the login page. Use strong passwords and trusted users. Traffic passes through Cloudflare. Links change on restart. Never expose Flask debug mode.</div>
-  <p id="tunnel-state" role="status" aria-live="polite">{{ "Connected" if tunnel.ready else "Starting / reconnecting" if tunnel.running else "Stopped" }}</p>
-  <a id="tunnel-link" class="text-break fw-semibold" href="{{ tunnel.url or '#' }}" target="_blank" rel="noopener noreferrer" {% if not tunnel.ready %}hidden{% endif %}>{{ tunnel.url }}</a>
-  <p class="small text-danger" id="tunnel-error">{{ tunnel.error }}</p>
-  <div class="d-flex flex-wrap gap-2 mb-3">
-    <button class="btn btn-outline-primary" type="button" id="refresh-tunnel">Refresh tunnel status</button>
-  </div>
-  <form method="post" action="{{ url_for('main.manage_tunnel') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label class="d-block mb-3"><input type="checkbox" name="confirm_public" value="yes"> I understand this makes my app publicly reachable through Cloudflare.</label>
-    <button class="btn btn-primary" name="action" value="start">Create public link</button>
-    <button class="btn btn-outline-danger" name="action" value="stop">Stop public link</button>
-  </form>
-  <details class="mt-3"><summary>Connection diagnostics</summary><pre class="small text-break mt-2" id="tunnel-logs" style="white-space: pre-wrap;">{{ tunnel.logs|join('\n') }}</pre></details>
-  <p class="form-text">Click Refresh until connected. Copy the link to share it. The Android app keeps using its fixed address. Stopping from this public page disconnects it; use your local address to reconnect.</p>
-</section>
 <section class="panel-card mb-4" id="email-settings">
   <div class="section-title"><h2>Email (password reset)</h2></div>
   <p class="text-secondary">Used to send "Forgot password" links. For GoDaddy Professional Email use host <code>smtpout.secureserver.net</code>, port <code>465</code>, security <strong>SSL</strong>, and your full mailbox address and mailbox password.</p>
@@ -71,30 +52,4 @@
     <button class="btn btn-primary">Save settings</button>
   </form>
 </section>
-{% endblock %}
-{% block scripts %}
-<script>
-  let tunnelUrl = {{ tunnel.url|tojson }};
-  document.getElementById("refresh-tunnel").addEventListener("click", async () => {
-    const button = document.getElementById("refresh-tunnel");
-    button.disabled = true;
-    try {
-      const response = await fetch({{ url_for('main.tunnel_status')|tojson }}, { headers: { Accept: "application/json" }, cache: "no-store" });
-      if (!response.ok || response.redirected) throw new Error("Unable to load tunnel status. Sign in as admin and retry.");
-      const data = await response.json();
-      tunnelUrl = data.url;
-      document.getElementById("tunnel-state").textContent = data.ready ? "Connected" : data.running ? "Starting / reconnecting" : "Stopped";
-      const link = document.getElementById("tunnel-link");
-      link.textContent = tunnelUrl;
-      link.href = tunnelUrl || "#";
-      link.hidden = !data.ready;
-      document.getElementById("tunnel-error").textContent = data.error;
-      document.getElementById("tunnel-logs").textContent = data.logs.join("\n");
-    } catch (error) {
-      document.getElementById("tunnel-error").textContent = error.message;
-    } finally {
-      button.disabled = false;
-    }
-  });
-</script>
 {% endblock %}
