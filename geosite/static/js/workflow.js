@@ -3,7 +3,7 @@
   const verifyButton = document.getElementById("verify-location");
   let nextUrl = null;
 
-  verifyButton?.addEventListener("click", () => {
+  verifyButton?.addEventListener("click", async () => {
     if (nextUrl) {
       window.location.assign(nextUrl);
       return;
@@ -13,57 +13,59 @@
     verifyButton.textContent = "Requesting GPS...";
     feedback.className = "gps-feedback mt-4";
     feedback.textContent = "Waiting for a precise location fix.";
-    if (!window.isSecureContext) {
-      feedback.classList.add("error");
-      feedback.textContent = "GPS requires HTTPS. Local HTTP supports dashboard testing only; connect to your administrator's HTTPS server for site visits.";
+    const showError = (message) => {
+      feedback.className = "gps-feedback mt-4 error";
+      feedback.textContent = message;
       verifyButton.disabled = false;
       verifyButton.textContent = "Try again";
-      return;
-    }
-    if (!navigator.geolocation) {
-      feedback.classList.add("error");
-      feedback.textContent = "This browser does not support location services.";
-      verifyButton.disabled = false;
-      verifyButton.textContent = "Try again";
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(async (position) => {
+    };
+    const sendLocation = async (payload) => {
       try {
         const response = await fetch(verifyButton.dataset.endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
-          body: JSON.stringify({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-          }),
+          body: JSON.stringify(payload),
         });
         const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "Location verification failed.");
-        if (!result.verified) {
-          feedback.className = "gps-feedback mt-4 error";
-          feedback.textContent = `Not at the assigned site. Distance ${Number(result.distance).toFixed(1)} m; allowed ${Number(result.allowed).toFixed(0)} m.`;
-          verifyButton.disabled = false;
-          verifyButton.textContent = "Check location again";
-          return;
-        }
+        if (!response.ok) throw new Error(result.error || "Location capture failed.");
         feedback.className = "gps-feedback mt-4 success";
-        feedback.textContent = `Location verified. Distance ${Number(result.distance).toFixed(1)} m.`;
+        const distance = result.distance == null ? "" : ` Distance from assigned site: ${Number(result.distance).toFixed(1)} m.`;
+        feedback.textContent = verifyButton.dataset.flow === "checkout"
+          ? `Visit stopped. ${result.location_source === "last_known" ? "GPS unavailable; last captured location recorded." : result.location_source === "unavailable" ? "Location unavailable; this is recorded for the administrator." : "Stop location recorded."}${distance} Complete your report now or later.`
+          : `Location captured.${distance}${result.within_radius === false ? " Outside the reference radius; you can still continue." : ""}`;
         nextUrl = result.next;
         verifyButton.disabled = false;
         verifyButton.textContent = "Continue";
       } catch (error) {
-        feedback.className = "gps-feedback mt-4 error";
-        feedback.textContent = error.message;
-        verifyButton.disabled = false;
-        verifyButton.textContent = "Try again";
+        showError(error.message);
       }
+    };
+    const unavailable = async (reason, message) => {
+      if (verifyButton.dataset.flow === "checkout") {
+        feedback.textContent = `${message} Saving the last captured location.`;
+        await sendLocation({ location_unavailable: true, reason });
+      } else {
+        showError(message);
+      }
+    };
+    if (!window.isSecureContext) {
+      await unavailable("insecure_context", "GPS requires HTTPS. Connect to your administrator's HTTPS server.");
+      return;
+    }
+    if (!navigator.geolocation) {
+      await unavailable("unsupported", "This browser does not support location services.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition((position) => {
+      sendLocation({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
     }, (error) => {
-      feedback.className = "gps-feedback mt-4 error";
-      feedback.textContent = error.code === 1
-        ? "Location permission is required. Enable it in browser settings."
-        : "Could not determine your location. Move to an open area and retry.";
-      verifyButton.disabled = false;
-      verifyButton.textContent = "Try again";
+      unavailable(
+        error.code === 1 ? "permission_denied" : error.code === 3 ? "timeout" : "position_unavailable",
+        error.code === 1 ? "Location permission is off." : "Could not determine your current location."
+      );
     }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
   });
 

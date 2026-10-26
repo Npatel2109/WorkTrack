@@ -1,6 +1,6 @@
 # GeoSite Attendance & Site Report Management System
 
-A responsive Flask application for employee site assignments, GPS-validated attendance, live selfie capture, signed visit reports, PDF generation, Excel exports, and administrator audit/history views.
+A responsive Flask application for employee site assignments, GPS-recorded attendance, live selfie capture, signed visit reports, PDF generation, Excel exports, and administrator audit/history views.
 
 ## Requirements
 
@@ -77,6 +77,8 @@ For password reset emails, an administrator can open **Settings ? Email (passwor
 - Dashboard with employee/site totals, onsite/completed status, a completed-visit chart, and assigned-site map
 - Employee account creation, editing, password reset, and delete/deactivate behavior
 - Site assignment with WGS84 coordinates and configurable geofence radius (10–5,000 m; default 100 m)
+- Multiple active site assignments per engineer; **Add assignment** always adds a separate site without replacing earlier assignments
+- **Edit assignment** on each site card opens prefilled site/customer/address, map coordinates, radius and report-header fields. Edits affect only that assignment and are blocked while it has an active visit. Once attendance or invoice history exists, its engineer cannot be changed; add a separate assignment instead. Historical attendance coordinate/distance snapshots remain unchanged; site names/header details use the updated assignment when displayed/exported.
 - Completed report review, PDF download, Excel export, selfie viewing, attendance history, and account access audit log
 - Clickable dashboard totals that open their matching employee/site/visit/report lists
 - Invoice generation with required service dates, editable billable days, daily rate, currency, customer, and description. Amount is calculated as `billable days × daily rate`.
@@ -85,10 +87,79 @@ For password reset emails, an administrator can open **Settings ? Email (passwor
 ### Employee
 
 - View assigned site and open Google Maps directions
-- Check in only after server-side Haversine distance validation and a live browser camera capture
-- Check out after a second GPS validation and completed activity/billing report; print reports for offline customer name/signatures
+- Choose from all assigned sites when starting a visit (only one visit can be active at a time)
+- Start with a fresh GPS capture and live selfie, even outside the assigned site's reference radius
+- Stop with current GPS, or the last server-recorded location when GPS is unavailable; complete the activity/billing report now or later
 - Review and download completed reports
 - Download a single merged PDF for completed reports within a selected date range
+
+### Visit locations and daily automatic stop
+
+Apply the latest database migration before restarting the updated app:
+
+```powershell
+.\.venv\Scripts\python.exe -m flask --app wsgi db upgrade
+```
+
+The radius is a reference, not a block on starting or stopping. The server records
+the actual start/stop coordinates and Haversine distance in meters from the
+administrator's assigned coordinates. Each new visit snapshots those assigned
+coordinates, so later assignment edits do not change its recorded distances.
+**Admin > Attendance** shows both distances, clickable location links, capture
+timestamps, current/last-known/unavailable source, and automatic-stop status.
+PDF reports retain the distances and stop-location provenance too. Historical
+visits use the assigned coordinates available at migration time; missing
+historical distances and capture provenance are not invented.
+
+While an engineer has an active visit and an app page open and visible, it
+requests a fresh location immediately and every minute. Successful fixes replace
+the visit's last captured location in the database; this is not a full movement
+history. Starting still requires a fresh fix (valid for ten minutes) and a selfie.
+Stopping first attempts a fresh fix. If permission is denied, GPS is off, or the
+request fails/times out, the server uses the last captured fix (at least the
+start location), retaining its original capture time and marking it **last known**.
+If no fix exists it explicitly records **location unavailable**; it never
+substitutes the assigned site's coordinates.
+
+Stopping immediately ends attendance and leaves the report **pending**. Pending
+reports appear on the engineer's dashboard and in the admin status/attendance
+views. The engineer can complete them later, including after starting another
+visit. Report submission does not change the saved stop time or location, and
+pending reports are not included in completed-report downloads or billable exports.
+
+Forgotten visits close at **23:59 Asia/Kolkata (India, UTC+05:30)** on their start
+date, with a pending report. New starts are blocked during the final minute
+until local midnight. Automatic stops use the last location actually received
+from the device, clearly marked **last known**; a server cannot request fresh
+device GPS when the browser/WebView is closed, suspended, offline, or denied
+permission. Leaving device location on alone does not enable background GPS.
+The engineer should keep the app visible for location updates. True closed-app
+tracking would require a separate native background-location feature.
+
+**Deployment requirement:** run this idempotent command **every minute** with
+Windows Task Scheduler or your deployment's scheduler, even when nobody is
+using the app:
+
+```powershell
+.\.venv\Scripts\python.exe -m flask --app wsgi close-overdue-visits
+```
+
+Set its working directory to the project root and use the deployment's normal
+environment/database. For example, from the project directory on Windows:
+
+```powershell
+$project = (Get-Location).Path
+$action = New-ScheduledTaskAction -Execute "$project\.venv\Scripts\python.exe" -Argument '-m flask --app wsgi close-overdue-visits' -WorkingDirectory $project
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "WorkTrack visit cutoff" -Action $action -Trigger $trigger -Description "Stop overdue visits at 23:59 India time"
+```
+
+Configure the task to run whether the service account is logged on or not,
+using Task Scheduler's credential/security settings. Monitor nonzero exit codes;
+database errors are not suppressed. The web app also catches up overdue visits
+before authenticated app requests, using their original 23:59 cutoff rather than the later request
+time. This covers downtime, but does not replace the scheduled command for
+unattended closure. No OS task is installed automatically by the application.
 
 ### Site coordinates
 
@@ -175,7 +246,7 @@ attendance records.
 
 The sign-in page provides **Forgot password?** Reset links are emailed to active accounts, expire after one hour, and are invalidated after use. Configure the SMTP values below before enabling account recovery.
 
-GPS verification is repeated on the server and expires after ten minutes. Site coordinates, report ownership, role access, uploaded image decoding/size, and required fields are validated server-side. Browser geolocation is a device/browser signal, not an anti-spoofing guarantee; deployments with high-assurance attendance requirements should add a trusted device attestation or supervised verification process.
+Start-location capture expires after ten minutes. Coordinates and distances are validated/calculated server-side without enforcing proximity. Report ownership, role access, uploaded image decoding/size, and required fields are validated server-side. Browser geolocation is a device/browser signal, not an anti-spoofing guarantee; deployments with high-assurance attendance requirements should add a trusted device attestation or supervised verification process.
 
 ## Security and operations
 
@@ -205,6 +276,14 @@ instance/               Local database and private uploads (not committed)
 migrations/              Generated and version-controlled with Flask-Migrate
 wsgi.py                  WSGI entry point
 requirements.txt
+```
+
+Attendance regression checks (JavaScript tests use Node.js's built-in runner):
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_workflows.py -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_attendance_migration.py -v
+node --test tests\location_workflow.test.js
 ```
 
 ## Temporary public HTTPS link (Cloudflare)

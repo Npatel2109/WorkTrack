@@ -11,6 +11,17 @@
   </div>
   {% else %}<p class="text-secondary mb-0">No leave requests yet. Apply for a full day or a morning/afternoon half day.</p>{% endfor %}
 </section>
+{% if pending_visits %}
+<section class="panel-card mb-4">
+  <div class="section-title"><div><p class="eyebrow">REPORTS TO COMPLETE</p><h2>Stopped visits - report pending</h2></div></div>
+  {% for visit in pending_visits %}
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 py-2 border-bottom">
+    <div><strong>{{ visit.site.site_name }}</strong><div class="small text-secondary">{{ "Auto-stopped at the daily 23:59 India cutoff" if visit.auto_closed else "Visit stopped" }}: {{ visit.checkout_time.strftime("%d %b %Y %H:%M UTC") }}</div></div>
+    <a class="btn btn-outline-primary" href="{{ url_for('main.site_report_form', attendance_id=visit.id) }}">Complete report</a>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
 {% if active_attendance %}
 <section class="active-visit-card mb-4">
   <div class="active-visit-top"><div><span class="eyebrow text-white-50">CURRENT VISIT</span><h2>{{ active_attendance.site.site_name }}</h2><p>{{ active_attendance.site.customer_name }} · {{ active_attendance.site.address }}</p></div><span class="status-pill onsite">ONSITE</span></div>

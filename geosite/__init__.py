@@ -86,6 +86,13 @@ def create_app(test_config=None):
     login_manager.login_message_category = "warning"
 
     @app.before_request
+    def finish_overdue_visits():
+        from .attendance import close_overdue_visits
+
+        if request.blueprint == "main" and current_user.is_authenticated:
+            close_overdue_visits()
+
+    @app.before_request
     def enforce_idle_timeout():
         if not current_user.is_authenticated:
             return None
@@ -120,7 +127,19 @@ def create_app(test_config=None):
 
     @app.context_processor
     def inject_year():
-        return {"current_year": datetime.now().year}
+        from .models import Attendance
+
+        active = None
+        if current_user.is_authenticated and not current_user.is_admin:
+            active = Attendance.query.filter_by(employee_id=current_user.id, status="onsite").first()
+        return {"current_year": datetime.now().year, "tracking_attendance": active}
+
+    @app.cli.command("close-overdue-visits")
+    def close_overdue_visits_command():
+        """Stop forgotten visits at 23:59 Asia/Kolkata; run every minute."""
+        from .attendance import close_overdue_visits
+
+        click.echo(f"Automatically stopped {close_overdue_visits()} visit(s).")
 
     @app.errorhandler(413)
     def request_too_large(_error):

@@ -3,7 +3,8 @@
 {% block content %}
 <div class="workflow-wrap workflow-wide"><a class="back-link" href="{{ url_for('main.employee_dashboard') }}">Back to dashboard</a>
   <section class="workflow-card"><div class="workflow-step"><span>STEP 2</span><span class="step-line"></span><span class="muted">SITE ACTIVITY REPORT</span></div>
-    <div class="mt-4"><p class="eyebrow">CHECK-OUT VERIFIED</p><h1 class="h2">Complete site visit report</h1><p class="text-secondary">{{ attendance.site.site_name }} · {{ attendance.site.customer_name }}</p></div>
+    <div class="mt-4"><p class="eyebrow">{{ "AUTO-STOPPED - REPORT PENDING" if attendance.auto_closed else "VISIT STOPPED - REPORT PENDING" }}</p><h1 class="h2">Complete site visit report</h1><p class="text-secondary">{{ attendance.site.site_name }} · {{ attendance.site.customer_name }}</p></div>
+    <p class="text-secondary small">Stopped at {{ attendance.checkout_time.strftime("%d %b %Y %H:%M UTC") }}. Submitting this report does not change the stop time or recorded location.</p>
     <div class="alert alert-info"><strong>Checked in:</strong> {{ attendance.checkin_time.strftime("%d %b %Y · %H:%M UTC") }}. Enter the activity and billing details. Customer name and signatures can be filled offline after printing the report.</div>
     <form method="post" id="site-report-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="row g-3">

@@ -1,6 +1,7 @@
+{% set suffix = header_suffix or (header_site.id if header_site else 'new') %}
 {% for field, label, limit in [('report_company', 'Reporting company', 160), ('commissioning_manager', 'Commissioning manager', 120), ('project_manager', 'Project manager', 120)] %}
-<label class="form-label" for="{{ field }}-{{ header_site.id if header_site else 'new' }}">{{ label }}</label>
-<input class="form-control mb-2" id="{{ field }}-{{ header_site.id if header_site else 'new' }}" name="{{ field }}" maxlength="{{ limit }}" value="{{ header_site|attr(field) if header_site else '' }}">
+<label class="form-label" for="{{ field }}-{{ suffix }}">{{ label }}</label>
+<input class="form-control mb-2" id="{{ field }}-{{ suffix }}" name="{{ field }}" maxlength="{{ limit }}" value="{{ header_site[field] if header_site else '' }}">
 {% endfor %}
-<label class="form-label" for="report-remarks-{{ header_site.id if header_site else 'new' }}">Report remarks (one per line, up to five)</label>
-<textarea class="form-control mb-2" id="report-remarks-{{ header_site.id if header_site else 'new' }}" name="report_remarks" maxlength="2000" rows="3">{{ header_site.report_remarks if header_site else '' }}</textarea>
+<label class="form-label" for="report-remarks-{{ suffix }}">Report remarks (one per line, up to five)</label>
+<textarea class="form-control mb-2" id="report-remarks-{{ suffix }}" name="report_remarks" maxlength="2000" rows="3">{{ header_site.report_remarks if header_site else '' }}</textarea>

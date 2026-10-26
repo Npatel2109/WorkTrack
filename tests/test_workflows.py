@@ -11,6 +11,7 @@ from pypdf import PdfReader
 from openpyxl import load_workbook
 
 from geosite import create_app
+from geosite.attendance import as_utc, close_overdue_visits, daily_cutoff
 from geosite.extensions import db
 from geosite.models import AssignedSite, Attendance, AuditLog, Invoice, LeaveRequest, SiteReport, User
 
@@ -245,8 +246,10 @@ class WorkflowTests(unittest.TestCase):
             f"/api/visit/{self.site.id}/verify-checkin",
             json={"latitude": 0, "longitude": 0.01},
         )
-        self.assertFalse(too_far.get_json()["verified"])
-        self.assertEqual(self.client.get(f"/visit/{self.site.id}/camera").status_code, 403)
+        self.assertTrue(too_far.get_json()["verified"])
+        self.assertFalse(too_far.get_json()["within_radius"])
+        self.assertGreater(too_far.get_json()["distance"], 1100)
+        self.assertEqual(self.client.get(f"/visit/{self.site.id}/camera").status_code, 200)
         verified = self.client.post(
             f"/api/visit/{self.site.id}/verify-checkin",
             json={"latitude": 0, "longitude": 0},
@@ -342,7 +345,7 @@ class WorkflowTests(unittest.TestCase):
             json={"latitude": 0, "longitude": 0},
         )
         self.client.post(f"/visit/{attendance.id}/report", data={"work_performed": "Inspection"})
-        self.assertEqual(Attendance.query.one().status, "onsite")
+        self.assertEqual(Attendance.query.one().status, "report_pending")
         self.assertEqual(SiteReport.query.count(), 0)
         response = self.client.post(f"/visit/{attendance.id}/report", data={
             "activity_detail": "Inspection", "billing": "non_billable", "engineer_name": "",
@@ -354,6 +357,392 @@ class WorkflowTests(unittest.TestCase):
         })
         self.assertEqual(Attendance.query.one().status, "completed")
         self.assertFalse(SiteReport.query.one().is_billable)
+
+    def _start_location_visit(self, longitude=0.01):
+        self._login_employee()
+        response = self.client.post(
+            f"/api/visit/{self.site.id}/verify-checkin",
+            json={"latitude": 0, "longitude": longitude},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.client.post(
+            f"/visit/{self.site.id}/checkin", data={"selfie": self._image_data()}
+        )
+        return Attendance.query.one()
+
+    def test_outside_radius_start_and_stop_record_distances_and_fresh_location(self):
+        visit = self._start_location_visit()
+        self.assertAlmostEqual(visit.checkin_distance_m, 1111.949, places=2)
+        self.assertEqual((visit.site_latitude, visit.site_longitude), (0, 0))
+        self.assertEqual(visit.checkin_lon, 0.01)
+        self.assertIsNotNone(visit.checkin_location_time)
+        response = self.client.post(
+            f"/api/visit/{visit.id}/verify-checkout",
+            json={"latitude": 0, "longitude": 0.02},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["location_source"], "current")
+        db.session.refresh(visit)
+        self.assertEqual(visit.status, "report_pending")
+        self.assertEqual(visit.checkout_lon, 0.02)
+        self.assertAlmostEqual(visit.checkout_distance_m, 2223.899, places=2)
+        self.assertEqual(visit.checkout_location_time, visit.checkout_time)
+        self.assertFalse(visit.auto_closed)
+        self.assertIn(b"Complete report", self.client.get("/employee").data)
+        self.assertEqual(self.client.get(f"/reports/{visit.id}/pdf").status_code, 404)
+        # Assignment edits must not rewrite the original distance reference.
+        self.site.longitude = 1
+        db.session.commit()
+        self.assertEqual(visit.site_longitude, 0)
+        self.assertAlmostEqual(visit.checkin_distance_m, 1111.949, places=2)
+
+    def test_location_off_stop_uses_latest_persisted_fix_not_client_coordinates(self):
+        visit = self._start_location_visit()
+        response = self.client.post(
+            f"/api/visit/{visit.id}/location", json={"latitude": 0, "longitude": 0.03}
+        )
+        self.assertEqual(response.status_code, 200)
+        db.session.refresh(visit)
+        captured = visit.last_location_time
+        response = self.client.post(f"/api/visit/{visit.id}/verify-checkout", json={
+            "location_unavailable": True, "reason": "permission_denied",
+            "latitude": 50, "longitude": 50,
+        })
+        self.assertEqual(response.status_code, 200)
+        db.session.refresh(visit)
+        self.assertEqual(visit.checkout_lon, 0.03)
+        self.assertEqual(visit.checkout_location_time, captured)
+        self.assertEqual(visit.checkout_location_source, "last_known")
+        self.assertEqual(visit.checkout_location_reason, "permission_denied")
+        self.assertAlmostEqual(visit.checkout_distance_m, 3335.848, places=2)
+        self.assertEqual(AuditLog.query.filter_by(action="site_checkout").count(), 1)
+        stopped_at = visit.checkout_time
+        self.client.post(f"/api/visit/{visit.id}/verify-checkout", json={"latitude": 1, "longitude": 1})
+        db.session.refresh(visit)
+        self.assertEqual(visit.checkout_time, stopped_at)
+        self.assertEqual(visit.checkout_lon, 0.03)
+        self.assertEqual(AuditLog.query.filter_by(action="site_checkout").count(), 1)
+        response = self.client.post(f"/api/visit/{visit.id}/location", json={"latitude": 1, "longitude": 1})
+        self.assertEqual(response.status_code, 409)
+        db.session.refresh(visit)
+        self.assertEqual(visit.last_location_lon, 0.03)
+
+    def test_gps_failures_fall_back_to_start_and_invalid_input_is_explicit(self):
+        visit = self._start_location_visit()
+        for payload in ([], ["bad"], {"latitude": 91, "longitude": 0},
+                        {"latitude": 0, "longitude": float("nan")},
+                        {"location_unavailable": True, "reason": "bad"}):
+            response = self.client.post(f"/api/visit/{visit.id}/verify-checkout", json=payload)
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("error", response.json)
+            self.assertEqual(visit.status, "onsite")
+        response = self.client.post(f"/api/visit/{visit.id}/verify-checkout", json={
+            "location_unavailable": True, "reason": "timeout",
+        })
+        self.assertEqual(response.status_code, 200)
+        db.session.refresh(visit)
+        self.assertEqual(visit.checkout_lon, visit.checkin_lon)
+        self.assertEqual(visit.checkout_location_source, "last_known")
+
+    def test_start_requires_valid_fresh_location_and_live_selfie(self):
+        self._login_employee()
+        self.assertEqual(self.client.get(f"/visit/{self.site.id}/camera").status_code, 403)
+        self.assertEqual(self.client.post(
+            f"/api/visit/{self.site.id}/verify-checkin", json={"location_unavailable": True}
+        ).status_code, 400)
+        self.assertEqual(self.client.post(f"/visit/{self.site.id}/checkin").status_code, 403)
+        self.client.post(f"/api/visit/{self.site.id}/verify-checkin", json={"latitude": 0, "longitude": 0.01})
+        with self.client.session_transaction() as stored:
+            verification = stored["visit_verification"]
+            verification["verified_at"] = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat()
+            stored["visit_verification"] = verification
+        self.assertEqual(self.client.get(f"/visit/{self.site.id}/camera").status_code, 403)
+        self.assertEqual(self.client.post(f"/visit/{self.site.id}/checkin").status_code, 403)
+        self.assertEqual(Attendance.query.count(), 0)
+
+    def test_daily_cutoff_is_exact_india_time_and_catches_up_idempotently(self):
+        visit = self._start_location_visit()
+        visit.checkin_time = datetime(2026, 10, 20, 5, tzinfo=timezone.utc)
+        visit.last_location_time = datetime(2026, 10, 20, 18, 28, tzinfo=timezone.utc)
+        visit.last_location_lon = 0.04
+        db.session.commit()
+        cutoff = datetime(2026, 10, 20, 18, 29, tzinfo=timezone.utc)
+        self.assertEqual(daily_cutoff(visit.checkin_time), cutoff)
+        self.assertEqual(close_overdue_visits(cutoff - timedelta(microseconds=1)), 0)
+        self.assertEqual(close_overdue_visits(cutoff), 1)
+        db.session.refresh(visit)
+        self.assertEqual(visit.status, "report_pending")
+        self.assertEqual(as_utc(visit.checkout_time), cutoff)
+        self.assertEqual(visit.checkout_lon, 0.04)
+        self.assertEqual(visit.checkout_location_source, "last_known")
+        self.assertEqual(visit.checkout_location_reason, "daily_cutoff")
+        self.assertTrue(visit.auto_closed)
+        self.assertEqual(close_overdue_visits(cutoff + timedelta(days=3)), 0)
+        self.assertEqual(AuditLog.query.filter_by(action="site_auto_checkout").count(), 1)
+        self.assertEqual(SiteReport.query.count(), 0)
+
+    def test_scheduler_catches_up_offline_visits_and_report_keeps_stop_details(self):
+        visit = self._start_location_visit()
+        visit.checkin_time = datetime(2026, 10, 19, 6, tzinfo=timezone.utc)
+        visit.last_location_time = visit.checkin_time
+        db.session.commit()
+        result = self.app.test_cli_runner().invoke(args=["close-overdue-visits"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("stopped 1 visit", result.output)
+        db.session.refresh(visit)
+        stopped = (visit.checkout_time, visit.checkout_lat, visit.checkout_lon, visit.checkout_location_time)
+        self.assertEqual(as_utc(visit.checkout_time), datetime(2026, 10, 19, 18, 29, tzinfo=timezone.utc))
+        self.assertEqual(self.client.get(f"/visit/{visit.id}/report").status_code, 200)
+        response = self.client.post(f"/visit/{visit.id}/report", data={
+            "activity_detail": "Work before cutoff", "billing": "billable", "engineer_name": "Engineer",
+        })
+        self.assertEqual(response.status_code, 302)
+        db.session.refresh(visit)
+        self.assertEqual(visit.status, "completed")
+        self.assertEqual((visit.checkout_time, visit.checkout_lat, visit.checkout_lon, visit.checkout_location_time), stopped)
+        self.assertTrue(visit.auto_closed)
+        self.assertEqual(self.client.post(f"/visit/{visit.id}/report", data={}).status_code, 403)
+        self.assertEqual(SiteReport.query.count(), 1)
+
+    def test_request_catches_overdue_visit_and_admin_sees_distances_and_provenance(self):
+        visit = self._start_location_visit()
+        visit.checkin_time = datetime(2026, 10, 20, 5, tzinfo=timezone.utc)
+        visit.last_location_time = visit.checkin_time
+        db.session.commit()
+        response = self.client.get("/employee")
+        self.assertIn(b"Auto-stopped at the daily 23:59 India cutoff", response.data)
+        self.assertIn(b"Complete report", response.data)
+        self.assertNotIn(b"Onsite now", response.data)
+        self.client.post("/logout")
+        self.client.post("/login", data={"email": self.admin.email, "password": "admin-password-123"})
+        response = self.client.get("/admin/attendance")
+        self.assertEqual(response.status_code, 200)
+        for text in (b"1111.9 m from assigned site", b"Last captured location", b"Daily Cutoff",
+                     b"Report Pending", b"0.00000, 0.01000", b"Auto-stopped (23:59 India)"):
+            self.assertIn(text, response.data)
+        live = self.client.get("/api/admin/live-status").json
+        self.assertEqual(live["onsite_count"], 0)
+        self.assertEqual(live["employees"][0]["status"], "report-pending")
+        self.assertIn(b"Stopped visits", self.client.get("/admin/metrics/pending-reports").data)
+
+    def test_location_and_pending_reports_are_owner_scoped(self):
+        visit = self._start_location_visit()
+        other = User(name="Other", email="other@example.com", mobile="3")
+        other.set_password("other-password-123")
+        db.session.add(other)
+        db.session.commit()
+        # Isolate Flask-Login's request user cache from the outer test app context.
+        with self.app.app_context():
+            client = self.app.test_client()
+            client.post("/login", data={"email": other.email, "password": "other-password-123"})
+            for path in ("location", "verify-checkout"):
+                response = client.post(f"/api/visit/{visit.id}/{path}", json={"latitude": 0, "longitude": 0})
+                self.assertEqual(response.status_code, 404)
+            self.assertEqual(client.get(f"/visit/{visit.id}/report").status_code, 404)
+            self.assertEqual(client.get("/admin/attendance").status_code, 403)
+        self.assertEqual(self.client.get(f"/visit/{visit.id}/report").status_code, 403)
+        self.assertEqual(self.client.post(
+            f"/api/visit/{self.site.id}/verify-checkin", json={"latitude": 0, "longitude": 0}
+        ).status_code, 409)
+
+    def test_daily_cutoff_blocks_new_start_until_local_midnight(self):
+        self._login_employee()
+        cutoff = datetime(2026, 10, 26, 18, 29, tzinfo=timezone.utc)
+        endpoint = f"/api/visit/{self.site.id}/verify-checkin"
+        with patch("geosite.routes.utcnow", return_value=cutoff):
+            self.assertEqual(self.client.post(endpoint, json={"latitude": 0, "longitude": 0}).status_code, 409)
+        with patch("geosite.routes.utcnow", return_value=cutoff + timedelta(minutes=1)):
+            self.assertEqual(self.client.post(endpoint, json={"latitude": 0, "longitude": 0}).status_code, 200)
+
+    def test_pending_report_does_not_block_new_visit_or_clear_its_location_capture(self):
+        visit = self._start_location_visit()
+        self.client.post(f"/api/visit/{visit.id}/verify-checkout", json={
+            "location_unavailable": True, "reason": "permission_denied",
+        })
+        stopped_at = visit.checkout_time
+        self.assertEqual(self.client.post(
+            f"/api/visit/{self.site.id}/verify-checkin", json={"latitude": 0, "longitude": 0.02}
+        ).status_code, 200)
+        response = self.client.post(f"/visit/{visit.id}/report", data={
+            "activity_detail": "Earlier visit", "billing": "non_billable", "engineer_name": "Engineer",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.client.get(f"/visit/{self.site.id}/camera").status_code, 200)
+        self.client.post(f"/visit/{self.site.id}/checkin", data={"selfie": self._image_data()})
+        self.assertEqual(Attendance.query.filter_by(status="onsite").count(), 1)
+        self.assertEqual(Attendance.query.filter_by(status="completed").count(), 1)
+        db.session.refresh(visit)
+        self.assertEqual(visit.checkout_time, stopped_at)
+
+    def _login_admin(self):
+        self.client.post("/logout")
+        return self.client.post("/login", data={
+            "email": self.admin.email, "password": "admin-password-123",
+        })
+
+    def _site_payload(self, **updates):
+        return {
+            "employee_id": str(self.employee.id), "site_name": "South Site",
+            "customer_name": "South Customer", "address": "2 Example Road",
+            "latitude": "19", "longitude": "72", "allowed_radius": "250",
+            "project_name": "Project Two", "po_number": "PO-200", "po_date": "2026-10-01",
+            "report_company": "Reporting Co", "commissioning_manager": "Commissioning Lead",
+            "project_manager": "Project Lead", "report_remarks": "First\nSecond",
+            **updates,
+        }
+
+    def test_admin_assigns_multiple_sites_without_replacing_existing_assignments(self):
+        self._login_admin()
+        response = self.client.post("/admin/sites", data=self._site_payload(), follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(AssignedSite.query.filter_by(employee_id=self.employee.id, is_active=True).count(), 2)
+        db.session.refresh(self.site)
+        self.assertEqual(self.site.site_name, "North Site")
+        self.assertEqual(self.site.latitude, 0)
+        self.assertTrue(self.site.is_active)
+        self.assertIn(b"North Site, South Site", self.client.get("/admin").data)
+        live = self.client.get("/api/admin/live-status").json["employees"][0]
+        self.assertEqual(live["site"], "North Site, South Site")
+        self.client.post("/logout")
+        dashboard = self._login_employee()
+        self.assertIn(b"North Site", dashboard.data)
+        self.assertIn(b"South Site", dashboard.data)
+        second = AssignedSite.query.filter_by(site_name="South Site").one()
+        self.assertEqual(self.client.post(f"/visit/start/{second.id}").status_code, 302)
+        self.assertEqual(self.client.post(
+            f"/api/visit/{second.id}/verify-checkin", json={"latitude": 19, "longitude": 72}
+        ).status_code, 200)
+        self.client.post(f"/visit/{second.id}/checkin", data={"selfie": self._image_data()})
+        self.assertEqual(Attendance.query.one().site_id, second.id)
+        self.assertEqual(self.client.post(
+            f"/api/visit/{self.site.id}/verify-checkin", json={"latitude": 0, "longitude": 0}
+        ).status_code, 409)
+
+    def test_edit_assignment_prefills_and_updates_only_selected_site(self):
+        self._login_admin()
+        self.client.post("/admin/sites", data=self._site_payload())
+        second = AssignedSite.query.filter_by(site_name="South Site").one()
+        url = f"/admin/sites/{second.id}/edit"
+        form = self.client.get(url)
+        self.assertEqual(form.status_code, 200)
+        for value in (b'value="South Site"', b'value="19.0"', b'Project Two', b'PO-200',
+                      b'Reporting Co', b'First\nSecond', b'Save changes'):
+            self.assertIn(value, form.data)
+        response = self.client.post(url, data=self._site_payload(
+            site_name="South Updated", customer_name="Updated Customer", address="New Address",
+            latitude="20", longitude="73", allowed_radius="500", project_name="Updated Project",
+            report_company="Updated Company",
+        ), follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        db.session.refresh(second)
+        self.assertEqual((second.site_name, second.customer_name, second.address),
+                         ("South Updated", "Updated Customer", "New Address"))
+        self.assertEqual((second.latitude, second.longitude, second.allowed_radius), (20, 73, 500))
+        self.assertEqual(second.project_name, "Updated Project")
+        self.assertEqual(second.report_company, "Updated Company")
+        self.assertEqual(AssignedSite.query.count(), 2)
+        db.session.refresh(self.site)
+        self.assertEqual(self.site.site_name, "North Site")
+        self.assertTrue(self.site.is_active)
+        self.assertEqual(AuditLog.query.filter_by(action="site_updated").count(), 1)
+
+    def test_assignment_edits_are_blocked_onsite_but_other_sites_can_be_added(self):
+        visit = self._start_location_visit()
+        with self.app.app_context():
+            client = self.app.test_client()
+            client.post("/login", data={"email": self.admin.email, "password": "admin-password-123"})
+            url = f"/admin/sites/{self.site.id}/edit"
+            for method in ("get", "post"):
+                response = getattr(client, method)(url, data=self._site_payload() if method == "post" else None,
+                                                   follow_redirects=True)
+                self.assertIn(b"cannot be edited during an active visit", response.data)
+            client.post("/admin/sites", data=self._site_payload())
+        db.session.refresh(self.site)
+        self.assertEqual(self.site.site_name, "North Site")
+        self.assertEqual(AssignedSite.query.filter_by(employee_id=self.employee.id, is_active=True).count(), 2)
+        db.session.refresh(visit)
+        self.assertEqual(visit.status, "onsite")
+
+    def test_historical_assignment_can_be_edited_without_reassigning_engineer(self):
+        visit = self._start_location_visit()
+        self.client.post(f"/api/visit/{visit.id}/verify-checkout", json={"latitude": 0, "longitude": 0.02})
+        snapshots = (visit.site_latitude, visit.site_longitude, visit.checkin_distance_m, visit.checkout_distance_m)
+        self._login_admin()
+        other = User(name="Other", email="other@example.com", mobile="3", password_hash="test")
+        db.session.add(other)
+        db.session.commit()
+        url = f"/admin/sites/{self.site.id}/edit"
+        response = self.client.post(url, data=self._site_payload(employee_id=str(other.id)), follow_redirects=True)
+        self.assertIn(b"engineer cannot be changed", response.data)
+        db.session.refresh(self.site)
+        self.assertEqual(self.site.employee_id, self.employee.id)
+        self.assertEqual(self.site.site_name, "North Site")
+        self.client.post(url, data=self._site_payload())
+        db.session.refresh(self.site)
+        self.assertEqual(self.site.site_name, "South Site")
+        self.assertEqual((self.site.latitude, self.site.longitude), (19, 72))
+        self.assertEqual(AssignedSite.query.count(), 1)
+        db.session.refresh(visit)
+        self.assertEqual((visit.site_latitude, visit.site_longitude, visit.checkin_distance_m, visit.checkout_distance_m), snapshots)
+        self.assertEqual(visit.employee_id, self.employee.id)
+
+    def test_assignment_without_history_can_move_to_another_active_engineer(self):
+        self._login_admin()
+        other = User(name="Other", email="other@example.com", mobile="3", password_hash="test")
+        db.session.add(other)
+        db.session.commit()
+        self.client.post(f"/admin/sites/{self.site.id}/edit", data=self._site_payload(employee_id=str(other.id)))
+        db.session.refresh(self.site)
+        self.assertEqual(self.site.employee_id, other.id)
+        self.assertEqual(AssignedSite.query.count(), 1)
+
+    def test_invoice_history_prevents_reassignment_but_allows_detail_edits(self):
+        self._login_admin()
+        self.client.post("/admin/invoices", data={
+            "site_id": self.site.id, "customer_name": "Example Customer",
+            "description": "Service", "start_date": "2026-10-10", "end_date": "2026-10-10",
+            "billable_days": "1", "daily_rate": "100", "currency": "INR",
+        })
+        self.assertEqual(Invoice.query.count(), 1)
+        other = User(name="Other", email="other@example.com", mobile="3", password_hash="test")
+        db.session.add(other)
+        db.session.commit()
+        url = f"/admin/sites/{self.site.id}/edit"
+        response = self.client.post(url, data=self._site_payload(employee_id=str(other.id)), follow_redirects=True)
+        self.assertIn(b"engineer cannot be changed", response.data)
+        self.client.post(url, data=self._site_payload())
+        db.session.refresh(self.site)
+        self.assertEqual(self.site.site_name, "South Site")
+        self.assertEqual(self.site.employee_id, self.employee.id)
+        self.assertEqual(Invoice.query.one().customer_name, "Example Customer")
+        self.assertEqual(Invoice.query.one().site_id, self.site.id)
+        self.assertEqual(Invoice.query.one().employee_id, self.employee.id)
+
+    def test_invalid_assignment_edit_keeps_saved_values_and_preserves_form_input(self):
+        self._login_admin()
+        url = f"/admin/sites/{self.site.id}/edit"
+        for payload in (self._site_payload(latitude="91"), self._site_payload(longitude="nan"),
+                        self._site_payload(allowed_radius="0"), self._site_payload(employee_id="999"),
+                        self._site_payload(site_name="x" * 161), self._site_payload(po_date="bad")):
+            response = self.client.post(url, data=payload)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b"Enter valid site details", response.data)
+            self.assertIn(b"2 Example Road", response.data)
+            db.session.refresh(self.site)
+            self.assertEqual(self.site.site_name, "North Site")
+            self.assertEqual(self.site.latitude, 0)
+        self.assertEqual(AssignedSite.query.count(), 1)
+        self.assertEqual(AuditLog.query.filter_by(action="site_updated").count(), 0)
+
+    def test_employee_cannot_create_or_edit_assignments(self):
+        self._login_employee()
+        self.assertEqual(self.client.post("/admin/sites", data=self._site_payload()).status_code, 403)
+        url = f"/admin/sites/{self.site.id}/edit"
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.assertEqual(self.client.post(url, data=self._site_payload()).status_code, 403)
+        self.assertEqual(AssignedSite.query.count(), 1)
+        self._login_admin()
+        self.assertEqual(self.client.get("/admin/sites/999/edit").status_code, 404)
 
     def test_admin_invoices_use_days_times_daily_rate(self):
         self.client.post(

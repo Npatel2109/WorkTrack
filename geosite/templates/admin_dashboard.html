@@ -8,10 +8,11 @@
     ('Assigned sites', site_count, '02', 'purple', 'sites'),
     ('Currently onsite', onsite_count, '03', 'green', 'onsite'),
     ('Completed today', completed_today, '04', 'orange', 'completed'),
-    ('Reports submitted', report_count, '05', 'slate', 'reports')
+    ('Reports submitted', report_count, '05', 'slate', 'reports'),
+    ('Reports pending', pending_report_count, '08', 'orange', 'pending-reports')
   ] %}
   <div class="col-6 col-xl"><a class="stat-card stat-card-link" href="{{ url_for('main.admin_metric', metric=metric) }}">
-    <div class="stat-icon {{ tone }}">{{ icon }}</div><div class="stat-label">{{ label }}</div><div class="stat-value" {% if metric == 'onsite' %}id="onsite-stat"{% endif %}>{{ value }}</div>
+    <div class="stat-icon {{ tone }}">{{ icon }}</div><div class="stat-label">{{ label }}</div><div class="stat-value" {% if metric == 'onsite' %}id="onsite-stat"{% elif metric == 'pending-reports' %}id="pending-report-stat"{% endif %}>{{ value }}</div>
   </a></div>
   {% endfor %}
   {% for label, value, icon, tone, filter, identifier in [
@@ -31,7 +32,7 @@
         <thead><tr><th>Employee</th><th>Assigned site</th><th>Check-in time</th><th>Status</th></tr></thead>
         <tbody id="live-status-body">{% for row in live_rows %}
           <tr><td><div class="fw-semibold">{{ row.employee.name }}</div><div class="small text-secondary">{{ row.employee.designation }}</div></td>
-            <td>{{ row.site.site_name if row.site else "No site assigned" }}{% if row.site %}<div class="small text-secondary">{{ row.site.customer_name }}</div>{% endif %}</td>
+            <td>{{ row.sites|map(attribute="site_name")|join(", ") if row.sites else "No site assigned" }}{% if row.sites %}<div class="small text-secondary">{{ row.sites|map(attribute="customer_name")|unique|join(", ") }}</div>{% endif %}</td>
             <td>{{ row.attendance.checkin_time.strftime("%H:%M") if row.attendance else "—" }}</td><td><span class="status-pill {{ row.status }}">{{ row.status|replace('-', ' ')|title }}</span></td>
           </tr>
         {% else %}<tr><td colspan="4" class="empty-state">No employees have been added yet.</td></tr>{% endfor %}</tbody>
@@ -39,9 +40,9 @@
     </section>
     <section class="panel-card mt-4"><div class="section-title"><div><p class="eyebrow">FIELD TEAMS</p><h2>Assigned site map</h2></div></div>
       <div id="live-map" class="map-canvas" aria-label="Map of assigned sites"></div>
-      <script type="application/json" id="map-sites">{{ live_rows|selectattr("site")|map(attribute="site")|map(attribute="latitude")|list|tojson }}</script>
-      <script type="application/json" id="map-data">{{ live_rows|selectattr("site")|map(attribute="site")|map(attribute="longitude")|list|tojson }}</script>
-      <script type="application/json" id="map-labels">{{ live_rows|selectattr("site")|map(attribute="site")|map(attribute="site_name")|list|tojson }}</script>
+      <script type="application/json" id="map-sites">{{ map_sites|map(attribute="latitude")|list|tojson }}</script>
+      <script type="application/json" id="map-data">{{ map_sites|map(attribute="longitude")|list|tojson }}</script>
+      <script type="application/json" id="map-labels">{{ map_sites|map(attribute="site_name")|list|tojson }}</script>
     </section>
   </div>
   <div class="col-xl-4">

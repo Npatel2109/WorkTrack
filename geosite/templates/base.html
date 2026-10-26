@@ -55,12 +55,16 @@
       </div>
       {% endfor %}
     {% endwith %}
+    {% if tracking_attendance %}
+    <div class="alert alert-info small" id="visit-location-status" role="status" data-endpoint="{{ url_for('main.capture_visit_location', attendance_id=tracking_attendance.id) }}">Capturing location for your active visit. Location updates require this page to remain open and visible.</div>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
   <footer class="container-fluid px-4 py-3 text-center small text-secondary">GeoSite Attendance &amp; Site Report Management · {{ current_year }}</footer>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  {% if tracking_attendance %}<script src="{{ url_for('static', filename='js/location-tracking.js') }}"></script>{% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

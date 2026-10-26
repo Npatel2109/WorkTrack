@@ -187,6 +187,7 @@ def generate_site_report_pdf(attendance, output, upload_folder):
             ["Date / Time", attendance.checkin_time.strftime("%Y-%m-%d %H:%M UTC")],
             ["Latitude", str(attendance.checkin_lat)],
             ["Longitude", str(attendance.checkin_lon)],
+            ["Distance from assigned site", f"{attendance.checkin_distance_m:.1f} m" if attendance.checkin_distance_m is not None else "Not recorded"],
         ],
     )
     selfie_path = Path(upload_folder) / attendance.checkin_selfie
@@ -208,6 +209,10 @@ def generate_site_report_pdf(attendance, output, upload_folder):
             ],
             ["Latitude", str(attendance.checkout_lat if attendance.checkout_lat is not None else "-")],
             ["Longitude", str(attendance.checkout_lon if attendance.checkout_lon is not None else "-")],
+            ["Distance from assigned site", f"{attendance.checkout_distance_m:.1f} m" if attendance.checkout_distance_m is not None else "Not recorded"],
+            ["Location source", safe(attendance.checkout_location_source or "Not recorded")],
+            ["Location captured at", attendance.checkout_location_time.strftime("%Y-%m-%d %H:%M:%S UTC") if attendance.checkout_location_time else "Not recorded"],
+            ["Stop method", "Automatic (23:59 India)" if attendance.auto_closed else "Manual"],
         ],
     )
     if report:

@@ -28,6 +28,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func
 
 from .extensions import db
+from .attendance import daily_cutoff, stop_attendance
 from .models import AppSettings, AssignedSite, Attendance, AuditLog, Invoice, LeaveRequest, SiteReport, User, utcnow
 from .services import (
     generate_invoice_pdf,
@@ -111,6 +112,8 @@ def _attendance_for_user(attendance_id):
 
 def _read_coordinates():
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return None, None, (jsonify(error="A JSON object with GPS coordinates is required."), 400)
     try:
         lat, lon = float(data.get("latitude")), float(data.get("longitude"))
         if not (-90 <= lat <= 90 and -180 <= lon <= 180):
@@ -118,14 +121,6 @@ def _read_coordinates():
         return lat, lon, None
     except (TypeError, ValueError):
         return None, None, (jsonify(error="Valid GPS coordinates are required."), 400)
-
-
-def _distance_to_site(site, lat, lon):
-    try:
-        distance = haversine_distance(site.latitude, site.longitude, lat, lon)
-    except (TypeError, ValueError):
-        return None
-    return distance if distance <= site.allowed_radius else None
 
 
 def _pdf_response(attendance):
@@ -191,8 +186,16 @@ def _live_rows(today):
             .order_by(Attendance.checkin_time.desc())
             .first()
         )
-        assigned = next((site for site in employee.assigned_sites if site.is_active), None)
-        site = active.site if active else assigned
+        pending = (
+            Attendance.query.filter_by(employee_id=employee.id, status="report_pending")
+            .order_by(Attendance.checkout_time.desc()).first()
+        )
+        assignments = sorted(
+            (site for site in employee.assigned_sites if site.is_active),
+            key=lambda site: (site.site_name, site.id),
+        )
+        assigned = assignments[0] if assignments else None
+        site = active.site if active else pending.site if pending else assigned
         last_login_event = (
             AuditLog.query.filter(
                 AuditLog.user_id == employee.id,
@@ -216,6 +219,8 @@ def _live_rows(today):
             if active
             else "on-leave"
             if employee.id in on_leave
+            else "report-pending"
+            if pending
             else "completed"
             if completed_today
             else "assigned"
@@ -226,7 +231,8 @@ def _live_rows(today):
             {
                 "employee": employee,
                 "site": site,
-                "attendance": active,
+                "sites": [active.site] if active else [pending.site] if pending else assignments,
+                "attendance": active or pending,
                 "status": status,
             }
         )
@@ -533,9 +539,11 @@ def admin_dashboard():
         employee_count=User.query.filter_by(role="employee").count(),
         site_count=AssignedSite.query.filter_by(is_active=True).count(),
         onsite_count=Attendance.query.filter_by(status="onsite").count(),
+        pending_report_count=Attendance.query.filter_by(status="report_pending").count(),
         completed_today=completed_today,
         report_count=SiteReport.query.count(),
         live_rows=rows,
+        map_sites=AssignedSite.query.filter_by(is_active=True).order_by(AssignedSite.site_name).all(),
         chart_labels=labels,
         chart_values=[counts.get(day, 0) for day in labels],
         **_leave_counts(today),
@@ -581,6 +589,15 @@ def admin_metric(metric):
                     "pdf_url": None,
                 }
             )
+    elif metric == "pending-reports":
+        title = "Stopped visits - report pending"
+        for visit in Attendance.query.filter_by(status="report_pending").order_by(Attendance.checkout_time.desc()):
+            rows.append({
+                "employee": visit.employee.name,
+                "details": f"{visit.site.site_name} - Stopped {visit.checkout_time:%Y-%m-%d %H:%M UTC}",
+                "status": "Auto-stopped; report pending" if visit.auto_closed else "Report pending",
+                "pdf_url": None,
+            })
     elif metric == "completed":
         title = "Completed today"
         visits = Attendance.query.filter(
@@ -624,12 +641,13 @@ def live_status():
     return jsonify(
         **_leave_counts(today),
         onsite_count=sum(row["status"] == "onsite" for row in rows),
+        pending_report_count=Attendance.query.filter_by(status="report_pending").count(),
         employees=[
             {
                 "name": row["employee"].name,
                 "designation": row["employee"].designation,
-                "site": row["site"].site_name if row["site"] else None,
-                "customer": row["site"].customer_name if row["site"] else None,
+                "site": ", ".join(site.site_name for site in row["sites"]) or None,
+                "customer": ", ".join(dict.fromkeys(site.customer_name for site in row["sites"])) or None,
                 "checkin_time": row["attendance"].checkin_time.strftime("%H:%M")
                 if row["attendance"]
                 else None,
@@ -738,8 +756,18 @@ def delete_employee(user_id):
 
 
 @bp.route("/admin/sites", methods=["GET", "POST"])
+@bp.route("/admin/sites/<int:site_id>/edit", methods=["GET", "POST"])
 @admin_required
-def sites():
+def sites(site_id=None):
+    editing_site = db.get_or_404(AssignedSite, site_id) if site_id is not None else None
+    has_history = bool(editing_site and (
+        Attendance.query.filter_by(site_id=editing_site.id).first()
+        or Invoice.query.filter_by(site_id=editing_site.id).first()
+    ))
+    if editing_site and Attendance.query.filter_by(site_id=editing_site.id, status="onsite").first():
+        flash("This site cannot be edited during an active visit. Other assignments can still be added or edited.", "danger")
+        return redirect(url_for("main.sites"))
+    values = request.form if request.method == "POST" else editing_site
     if request.method == "POST":
         try:
             employee_id = int(request.form.get("employee_id", ""))
@@ -760,7 +788,12 @@ def sites():
             if len(project_name) > 250 or len(po_number) > 120:
                 raise ValueError
             signoff = _report_signoff_fields()
-            if not employee or not all(details):
+            if not employee and editing_site and employee_id == editing_site.employee_id:
+                employee = editing_site.employee
+            if (
+                not employee or not all(details)
+                or len(details[0]) > 160 or len(details[1]) > 160
+            ):
                 raise ValueError
             if not (
                 -90 <= latitude <= 90
@@ -771,26 +804,16 @@ def sites():
         except (TypeError, ValueError):
             flash("Enter valid site details, coordinates, radius, employee and PO date. Keep company/manager fields within their limits and remarks to five lines (2,000 characters).", "danger")
         else:
-            existing = AssignedSite.query.filter_by(
-                employee_id=employee_id, is_active=True
-            ).first()
-            if existing and Attendance.query.filter_by(
-                site_id=existing.id, status="onsite"
-            ).first():
-                flash("The employee is onsite; wait until the visit is complete.", "danger")
-                return redirect(url_for("main.sites"))
-            has_history = existing and (
-                Attendance.query.filter_by(site_id=existing.id).first()
-                or Invoice.query.filter_by(site_id=existing.id).first()
-            )
-            if existing and not has_history:
-                existing.site_name, existing.customer_name, existing.address = details
-                existing.latitude, existing.longitude = latitude, longitude
-                existing.allowed_radius = radius
-                site = existing
+            if editing_site and has_history and employee_id != editing_site.employee_id:
+                flash("The assigned engineer cannot be changed after attendance or invoice history exists. Add a separate assignment instead.", "danger")
+                return redirect(url_for("main.sites", site_id=editing_site.id))
+            if editing_site:
+                site = editing_site
+                site.employee_id = employee_id
+                site.site_name, site.customer_name, site.address = details
+                site.latitude, site.longitude = latitude, longitude
+                site.allowed_radius = radius
             else:
-                if existing:
-                    existing.is_active = False
                 site = AssignedSite(
                     employee_id=employee_id,
                     site_name=details[0],
@@ -804,13 +827,20 @@ def sites():
             site.project_name, site.po_number, site.po_date = project_name, po_number, po_date
             for key, value in signoff.items():
                 setattr(site, key, value)
-            write_audit(current_user, "site_assigned", f"{site.site_name} -> {employee.email}")
+            db.session.flush()
+            write_audit(current_user, "site_updated" if editing_site else "site_assigned",
+                        f"Site {site.id}: {site.site_name} -> {employee.email}")
             db.session.commit()
             flash("Site assignment saved.", "success")
             return redirect(url_for("main.sites"))
     active_sites = AssignedSite.query.filter_by(is_active=True).order_by(AssignedSite.site_name).all()
     employee_options = User.query.filter_by(role="employee", is_active=True).order_by(User.name).all()
-    return render_template("sites.html", sites=active_sites, employees=employee_options)
+    if editing_site and all(employee.id != editing_site.employee_id for employee in employee_options):
+        employee_options.append(editing_site.employee)
+    return render_template(
+        "sites.html", sites=active_sites, employees=employee_options,
+        editing_site=editing_site, values=values, assignment_has_history=has_history,
+    )
 
 
 def _report_signoff_fields():
@@ -887,6 +917,8 @@ def employee_dashboard():
         "employee_dashboard.html",
         sites=AssignedSite.query.filter_by(employee_id=current_user.id, is_active=True).all(),
         active_attendance=_active_attendance(),
+        pending_visits=Attendance.query.filter_by(employee_id=current_user.id, status="report_pending")
+        .order_by(Attendance.checkout_time.desc()).all(),
         reports=reports,
         leave_requests=LeaveRequest.query.filter_by(employee_id=current_user.id)
         .order_by(LeaveRequest.created_at.desc()).limit(5).all(),
@@ -1061,25 +1093,27 @@ def checkin_location(site_id):
 @employee_required
 def verify_checkin(site_id):
     site = _employee_site(site_id)
+    if _active_attendance():
+        return jsonify(error="Finish your current visit before starting another."), 409
+    now = utcnow()
+    if now >= daily_cutoff(now):
+        return jsonify(error="Daily cutoff reached. Start a new visit after midnight India time."), 409
     latitude, longitude, error = _read_coordinates()
     if error:
         return error
     distance = haversine_distance(site.latitude, site.longitude, latitude, longitude)
-    if distance > site.allowed_radius:
-        session.pop("visit_verification", None)
-        return jsonify(
-            verified=False, distance=round(distance, 1), allowed=site.allowed_radius
-        )
     session["visit_verification"] = {
         "flow": "checkin",
         "site_id": site.id,
         "latitude": latitude,
         "longitude": longitude,
-        "verified_at": utcnow().isoformat(),
+        "verified_at": now.isoformat(),
     }
     return jsonify(
         verified=True,
         distance=round(distance, 1),
+        within_radius=distance <= site.allowed_radius,
+        allowed=site.allowed_radius,
         next=url_for("main.checkin_camera", site_id=site.id),
     )
 
@@ -1089,13 +1123,7 @@ def verify_checkin(site_id):
 def checkin_camera(site_id):
     site = _employee_site(site_id)
     verification = session.get("visit_verification", {})
-    if (
-        not _valid_verification(verification, "checkin", "site_id", site.id)
-        or _distance_to_site(
-            site, verification.get("latitude"), verification.get("longitude")
-        )
-        is None
-    ):
+    if not _valid_verification(verification, "checkin", "site_id", site.id) or _active_attendance():
         abort(403)
     return render_template("camera.html", site=site)
 
@@ -1107,13 +1135,13 @@ def complete_checkin(site_id):
     verification = session.get("visit_verification", {})
     if (
         not _valid_verification(verification, "checkin", "site_id", site.id)
-        or _distance_to_site(
-            site, verification.get("latitude"), verification.get("longitude")
-        )
-        is None
         or _active_attendance()
     ):
         abort(403)
+    now = utcnow()
+    if now >= daily_cutoff(now):
+        flash("Daily cutoff reached. Start a new visit after midnight India time.", "warning")
+        return redirect(url_for("main.employee_dashboard"))
     try:
         selfie = save_data_image(
             request.form.get("selfie", ""), current_app.config["UPLOAD_FOLDER"]
@@ -1126,6 +1154,16 @@ def complete_checkin(site_id):
         site_id=site.id,
         checkin_lat=verification["latitude"],
         checkin_lon=verification["longitude"],
+        checkin_time=now,
+        site_latitude=site.latitude,
+        site_longitude=site.longitude,
+        checkin_distance_m=haversine_distance(
+            site.latitude, site.longitude, verification["latitude"], verification["longitude"]
+        ),
+        checkin_location_time=datetime.fromisoformat(verification["verified_at"]),
+        last_location_lat=verification["latitude"],
+        last_location_lon=verification["longitude"],
+        last_location_time=datetime.fromisoformat(verification["verified_at"]),
         checkin_selfie=selfie,
         status="onsite",
     )
@@ -1134,7 +1172,7 @@ def complete_checkin(site_id):
     write_audit(current_user, "site_checkin", f"Attendance {attendance.id}")
     db.session.commit()
     session.pop("visit_verification", None)
-    flash("You are checked in at the assigned site.", "success")
+    flash("Site visit started. Your captured location and distance are recorded for the administrator.", "success")
     return redirect(url_for("main.employee_dashboard"))
 
 
@@ -1142,6 +1180,8 @@ def complete_checkin(site_id):
 @employee_required
 def checkout_location(attendance_id):
     attendance = _attendance_for_user(attendance_id)
+    if attendance.status == "report_pending":
+        return redirect(url_for("main.site_report_form", attendance_id=attendance.id))
     if attendance.status != "onsite":
         abort(404)
     return render_template(
@@ -1153,55 +1193,62 @@ def checkout_location(attendance_id):
 @employee_required
 def verify_checkout(attendance_id):
     attendance = _attendance_for_user(attendance_id)
+    if attendance.status == "report_pending":
+        return jsonify(
+            verified=True,
+            distance=round(attendance.checkout_distance_m, 1) if attendance.checkout_distance_m is not None else None,
+            location_source=attendance.checkout_location_source,
+            next=url_for("main.site_report_form", attendance_id=attendance.id),
+        )
     if attendance.status != "onsite":
         abort(404)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify(error="A JSON object is required."), 400
+    coordinates = None
+    reason = None
+    if data.get("location_unavailable") is True:
+        reason = data.get("reason")
+        if reason not in ("permission_denied", "position_unavailable", "timeout", "unsupported", "insecure_context"):
+            return jsonify(error="A valid location-unavailable reason is required."), 400
+    else:
+        latitude, longitude, error = _read_coordinates()
+        if error:
+            return error
+        coordinates = (latitude, longitude)
+    if not stop_attendance(attendance, utcnow(), coordinates=coordinates, reason=reason):
+        return jsonify(error="This visit has already stopped. Refresh your dashboard."), 409
+    db.session.commit()
+    return jsonify(
+        verified=True,
+        distance=round(attendance.checkout_distance_m, 1) if attendance.checkout_distance_m is not None else None,
+        location_source=attendance.checkout_location_source,
+        next=url_for("main.site_report_form", attendance_id=attendance.id),
+    )
+
+
+@bp.route("/api/visit/<int:attendance_id>/location", methods=["POST"])
+@employee_required
+def capture_visit_location(attendance_id):
+    attendance = _attendance_for_user(attendance_id)
     latitude, longitude, error = _read_coordinates()
     if error:
         return error
-    distance = haversine_distance(
-        attendance.site.latitude,
-        attendance.site.longitude,
-        latitude,
-        longitude,
-    )
-    if distance > attendance.site.allowed_radius:
-        session.pop("visit_verification", None)
-        return jsonify(
-            verified=False,
-            distance=round(distance, 1),
-            allowed=attendance.site.allowed_radius,
-        )
-    session["visit_verification"] = {
-        "flow": "checkout",
-        "attendance_id": attendance.id,
-        "latitude": latitude,
-        "longitude": longitude,
-        "verified_at": utcnow().isoformat(),
-    }
-    return jsonify(
-        verified=True,
-        distance=round(distance, 1),
-        next=url_for("main.site_report_form", attendance_id=attendance.id),
-    )
+    changed = Attendance.query.filter_by(id=attendance.id, status="onsite").update({
+        "last_location_lat": latitude, "last_location_lon": longitude,
+        "last_location_time": utcnow(),
+    })
+    if not changed:
+        return jsonify(error="This visit has stopped.", active=False), 409
+    db.session.commit()
+    return jsonify(recorded=True)
 
 
 @bp.route("/visit/<int:attendance_id>/report", methods=["GET", "POST"])
 @employee_required
 def site_report_form(attendance_id):
     attendance = _attendance_for_user(attendance_id)
-    verification = session.get("visit_verification", {})
-    if (
-        attendance.status != "onsite"
-        or not _valid_verification(
-            verification, "checkout", "attendance_id", attendance.id
-        )
-        or _distance_to_site(
-            attendance.site,
-            verification.get("latitude"),
-            verification.get("longitude"),
-        )
-        is None
-    ):
+    if attendance.status != "report_pending" or attendance.report:
         abort(403)
     if request.method == "POST":
         names = ("activity_detail", "billing", "engineer_name")
@@ -1209,10 +1256,11 @@ def site_report_form(attendance_id):
         if not all(values.values()) or values["billing"] not in ("billable", "non_billable"):
             flash("Enter activity detail, select Billable or Non-billable, and enter the engineer name.", "danger")
             return render_template("site_report.html", attendance=attendance, values=values)
-        attendance.checkout_lat = verification["latitude"]
-        attendance.checkout_lon = verification["longitude"]
-        attendance.checkout_time = utcnow()
-        attendance.status = "completed"
+        changed = Attendance.query.filter_by(id=attendance.id, status="report_pending").update({
+            "status": "completed",
+        })
+        if not changed:
+            abort(409)
         db.session.add(
             SiteReport(
                 attendance=attendance,
@@ -1226,9 +1274,8 @@ def site_report_form(attendance_id):
                 customer_signature="",
             )
         )
-        write_audit(current_user, "site_checkout", f"Attendance {attendance.id}")
+        write_audit(current_user, "site_report_submitted", f"Attendance {attendance.id}")
         db.session.commit()
-        session.pop("visit_verification", None)
         flash("Site visit completed successfully.", "success")
         return redirect(url_for("main.employee_dashboard"))
     return render_template("site_report.html", attendance=attendance, values={})
