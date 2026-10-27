@@ -54,7 +54,7 @@ def upgrade():
     )
     project_table = sa.table(
         "project",
-        sa.column("id", sa.Integer(), primary_key=True),
+        sa.column("id", sa.Integer()),
         sa.column("name", sa.String(length=250)),
     )
     rows = bind.execute(
