@@ -2,6 +2,26 @@
 {% block title %}App settings{% endblock %}
 {% block content %}
 <div class="page-heading"><div><p class="eyebrow">ADMINISTRATION</p><h1>App settings</h1></div></div>
+<section class="panel-card mb-4" id="brand-settings">
+  <div class="section-title"><h2>Company logo</h2></div>
+  <p class="text-secondary">Upload a PNG, JPEG, or WebP image up to 2 MB. It will replace the G mark in the navigation bar, sign-in page, and password recovery pages.</p>
+  {% if settings and settings.brand_logo_filename %}
+  <div class="d-flex align-items-center gap-3 mb-3">
+    <img class="brand-preview" src="{{ url_for('main.brand_logo') }}" alt="Current company logo">
+    <span class="small text-secondary">Current logo</span>
+  </div>
+  {% endif %}
+  <form method="post" enctype="multipart/form-data" class="d-flex flex-wrap align-items-end gap-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="section" value="brand">
+    <div><label class="form-label" for="brand-logo">Logo image</label>
+      <input class="form-control" id="brand-logo" name="brand_logo" type="file" accept="image/png,image/jpeg,image/webp" required></div>
+    <button class="btn btn-primary" name="action" value="upload">Upload logo</button>
+    {% if settings and settings.brand_logo_filename %}
+    <button class="btn btn-outline-danger" name="action" value="remove" formnovalidate>Remove logo</button>
+    {% endif %}
+  </form>
+</section>
 <section class="panel-card mb-4" id="email-settings">
   <div class="section-title"><h2>Email (password reset)</h2></div>
   <p class="text-secondary">Used to send "Forgot password" links. For GoDaddy Professional Email use host <code>smtpout.secureserver.net</code>, port <code>465</code>, security <strong>SSL</strong>, and your full mailbox address and mailbox password.</p>

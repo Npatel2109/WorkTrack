@@ -10,7 +10,7 @@ from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from PIL import Image
+from PIL import Image, ImageOps
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PyPdfError
 from reportlab.lib import colors
@@ -27,6 +27,7 @@ from .timeutils import format_ist
 
 EARTH_RADIUS_METERS = 6_371_000
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_BRAND_LOGO_BYTES = 2 * 1024 * 1024
 MAX_REPORT_PDF_BYTES = 5 * 1024 * 1024
 DATA_URL_PATTERN = re.compile(r"^data:image/(png|jpeg);base64,([A-Za-z0-9+/=]+)$")
 
@@ -73,6 +74,47 @@ def save_data_image(data_url, destination):
     image.thumbnail((1600, 1600))
     filename = f"{uuid.uuid4().hex}.png"
     image.save(Path(destination) / filename, format="PNG", optimize=True)
+    return filename
+
+
+def save_brand_logo(upload, destination):
+    if upload is None:
+        raise ValueError("Choose a logo image to upload.")
+    raw = upload.stream.read(MAX_BRAND_LOGO_BYTES + 1)
+    if not raw:
+        raise ValueError("Choose a logo image to upload.")
+    if len(raw) > MAX_BRAND_LOGO_BYTES:
+        raise ValueError("The logo image exceeds the 2 MB limit.")
+
+    try:
+        image = Image.open(BytesIO(raw))
+        output_format = image.format
+        if output_format not in ("PNG", "JPEG", "WEBP"):
+            raise ValueError("Upload a PNG, JPEG, or WebP logo image.")
+        if image.width * image.height > 20_000_000:
+            raise ValueError("The logo image exceeds the 20 megapixel limit.")
+        image.load()
+        image = ImageOps.exif_transpose(image)
+        has_transparency = "A" in image.getbands() or "transparency" in image.info
+        image.thumbnail((1024, 1024))
+        if output_format == "JPEG":
+            image = image.convert("RGB")
+            extension = "jpg"
+        else:
+            image = image.convert("RGBA" if has_transparency else "RGB")
+            extension = output_format.lower()
+    except (OSError, Image.DecompressionBombError) as error:
+        raise ValueError("The logo image could not be decoded.") from error
+
+    filename = f"{uuid.uuid4().hex}.{extension}"
+    Path(destination).mkdir(parents=True, exist_ok=True)
+    path = Path(destination) / filename
+    try:
+        with path.open("xb") as output:
+            image.save(output, format=output_format, optimize=True)
+    except OSError:
+        path.unlink(missing_ok=True)
+        raise
     return filename
 
 

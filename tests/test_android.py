@@ -1,7 +1,10 @@
+from io import BytesIO
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+from PIL import Image
 
 from geosite import create_app
 from geosite.extensions import db
@@ -210,3 +213,69 @@ class MailSettingsTests(SettingsTestCase):
             })
         smtp.assert_called_once_with("smtpout.secureserver.net", 587, timeout=15)
         smtp.return_value.__enter__.return_value.starttls.assert_called_once()
+
+
+class BrandLogoTests(SettingsTestCase):
+    def test_admin_can_upload_logo_for_all_brand_marks_and_remove_it(self):
+        self.assertIn(b'<span class="login-symbol">G</span>', self.client.get("/login").data)
+        self.login(self.admin)
+        logo = BytesIO()
+        Image.new("RGB", (4, 4), "blue").save(logo, format="PNG")
+        response = self.client.post(
+            "/admin/settings",
+            data={
+                "section": "brand",
+                "action": "upload",
+                "brand_logo": (BytesIO(logo.getvalue()), "company.png"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertIn(b"Brand logo uploaded", response.data)
+        saved = db.session.get(AppSettings, 1)
+        self.assertTrue(saved.brand_logo_filename.endswith(".png"))
+        logo_response = self.client.get("/brand-logo")
+        self.assertEqual(logo_response.status_code, 200)
+        self.assertEqual(logo_response.mimetype, "image/png")
+        self.assertEqual(logo_response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertTrue(logo_response.data.startswith(b"\x89PNG"))
+        self.assertIn(b'img class="brand-mark brand-logo-image"', response.data)
+
+        self.client.post("/logout")
+        for page in ("/login", "/forgot-password", "/reset-password/invalid"):
+            with self.subTest(page=page):
+                page_response = self.client.get(page)
+                self.assertEqual(page_response.status_code, 200)
+                self.assertIn(b'src="/brand-logo"', page_response.data)
+                self.assertNotIn(b">G</span>", page_response.data)
+
+        self.login(self.admin)
+        self.client.post("/admin/settings", data={
+            "section": "brand", "action": "remove",
+        }, follow_redirects=True)
+        self.assertIsNone(db.session.get(AppSettings, 1).brand_logo_filename)
+        self.assertEqual(self.client.get("/brand-logo").status_code, 404)
+        self.assertIn(b'<span class="brand-mark">G</span>', self.client.get("/admin/settings").data)
+
+    def test_logo_upload_rejects_non_image_and_employee_cannot_change_logo(self):
+        self.login(self.employee)
+        self.assertEqual(
+            self.client.post("/admin/settings", data={"section": "brand", "action": "remove"}).status_code,
+            403,
+        )
+        self.client.post("/logout")
+        self.login(self.admin)
+        unsupported = BytesIO()
+        Image.new("RGB", (1, 1), "red").save(unsupported, format="GIF")
+        response = self.client.post(
+            "/admin/settings",
+            data={
+                "section": "brand",
+                "action": "upload",
+                "brand_logo": (BytesIO(unsupported.getvalue()), "logo.gif"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertIn(b"Upload a PNG, JPEG, or WebP logo image.", response.data)
+        self.assertIsNone(db.session.get(AppSettings, 1))

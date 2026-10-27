@@ -1,0 +1,5 @@
+{% if brand_logo_filename %}
+<img class="{{ brand_symbol_class }} brand-logo-image" src="{{ url_for('main.brand_logo') }}" alt="GeoSite logo">
+{% else %}
+<span class="{{ brand_symbol_class }}">G</span>
+{% endif %}

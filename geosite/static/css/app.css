@@ -15,6 +15,10 @@ a:hover { color: #214dc7; }
 .navbar-brand { letter-spacing: -.03em; }
 .brand-mark, .login-symbol { display: inline-grid; place-items: center; color: #fff; background: linear-gradient(135deg, #5681ff, #3159db); border-radius: 10px; font-weight: 800; }
 .brand-mark { width: 29px; height: 29px; margin-right: 7px; font-size: 16px; }
+.brand-logo-image { object-fit: contain; background: #fff; padding: 2px; }
+.brand-logo-image.brand-mark { border-radius: 6px; }
+.brand-logo-image.login-symbol { border-radius: 16px; }
+.brand-preview { width: 72px; height: 72px; object-fit: contain; padding: 4px; background: #fff; border: 1px solid var(--border); border-radius: 12px; }
 .nav-link { color: #d7deec !important; font-size: .92rem; padding-inline: .8rem !important; }
 .nav-link:hover { color: #fff !important; }
 .page-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: .25rem 0 1.6rem; }

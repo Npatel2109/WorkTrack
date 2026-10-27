@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import smtplib
 import tempfile
 import uuid
@@ -45,6 +46,7 @@ from .services import (
     save_report_pdf,
     send_email,
     send_password_reset_email,
+    save_brand_logo,
     write_audit,
 )
 
@@ -366,11 +368,47 @@ def app_settings():
     settings = db.session.get(AppSettings, 1)
     if request.method == "POST":
         section = request.form.get("section", "android")
-        if section not in ("android", "mail"):
+        if section not in ("android", "mail", "brand"):
             abort(400)
         if settings is None:
             settings = AppSettings(id=1)
             db.session.add(settings)
+        if section == "brand":
+            action = request.form.get("action")
+            old_filename = settings.brand_logo_filename
+            if action == "upload":
+                try:
+                    filename = save_brand_logo(
+                        request.files.get("brand_logo"),
+                        Path(current_app.config["UPLOAD_FOLDER"]) / "brand-logos",
+                    )
+                except ValueError as error:
+                    db.session.rollback()
+                    flash(str(error), "danger")
+                    return redirect(url_for("main.app_settings", _anchor="brand-settings"))
+                settings.brand_logo_filename = filename
+                details = "Brand logo uploaded"
+            elif action == "remove":
+                settings.brand_logo_filename = None
+                details = "Brand logo removed"
+            else:
+                abort(400)
+            write_audit(current_user, "brand_logo_updated", details)
+            try:
+                db.session.commit()
+            except SQLAlchemyError:
+                db.session.rollback()
+                if action == "upload":
+                    (Path(current_app.config["UPLOAD_FOLDER"]) / "brand-logos" / filename).unlink(missing_ok=True)
+                raise
+            if (
+                old_filename
+                and old_filename != settings.brand_logo_filename
+                and re.fullmatch(r"[0-9a-f]{32}\.(?:png|jpg|webp)", old_filename)
+            ):
+                (Path(current_app.config["UPLOAD_FOLDER"]) / "brand-logos" / old_filename).unlink(missing_ok=True)
+            flash(f"{details}.", "success")
+            return redirect(url_for("main.app_settings", _anchor="brand-settings"))
         if section == "android":
             settings.android_download_enabled = request.form.get("android_download_enabled") == "yes"
             write_audit(current_user, "android_settings_updated",
@@ -422,6 +460,22 @@ def download_android():
         path, mimetype="application/vnd.android.package-archive",
         as_attachment=True, download_name="WorkTrack.apk", max_age=0,
     )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@bp.route("/brand-logo")
+def brand_logo():
+    settings = db.session.get(AppSettings, 1)
+    filename = settings.brand_logo_filename if settings else None
+    if not filename or not re.fullmatch(r"[0-9a-f]{32}\.(?:png|jpg|webp)", filename):
+        abort(404)
+    path = Path(current_app.config["UPLOAD_FOLDER"]) / "brand-logos" / filename
+    if not path.is_file():
+        abort(404)
+    mimetype = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}[path.suffix[1:]]
+    response = send_file(path, mimetype=mimetype, conditional=False, max_age=0)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cache-Control"] = "no-store"
     return response

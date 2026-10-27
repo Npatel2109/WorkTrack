@@ -43,6 +43,7 @@ class User(UserMixin, db.Model):
 
 class AppSettings(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    brand_logo_filename = db.Column(db.String(40))
     android_server_url = db.Column(db.String(500), nullable=False, default="")
     android_download_enabled = db.Column(
         db.Boolean, nullable=False, default=False, server_default=db.false()
