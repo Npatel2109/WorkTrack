@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Project list{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">FIELD OPERATIONS</p><h1>Project list</h1><p class="text-secondary mb-0">Manage project names used in site details and reports.</p></div>
+  <a class="btn btn-outline-primary" href="{{ url_for('main.sites') }}">Project sites</a>
+</div>
+<div class="row g-4">
+  <div class="col-xl-4">
+    <section class="panel-card">
+      <div class="section-title"><h2>Add project</h2></div>
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="form-label" for="project-name">Project name</label>
+        <input class="form-control mb-3" id="project-name" name="name" maxlength="250" value="{{ values.name if values else '' }}" required>
+        <button class="btn btn-primary w-100">Add project</button>
+      </form>
+    </section>
+  </div>
+  <div class="col-xl-8">
+    <section class="panel-card">
+      <div class="section-title"><h2>Projects <span class="count-badge">{{ projects|length }}</span></h2></div>
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead><tr><th>Project name</th><th>Sites</th><th>Actions</th></tr></thead>
+          <tbody>
+            {% for project in projects %}
+            <tr>
+              <td><form class="d-flex flex-wrap gap-2" method="post" action="{{ url_for('main.edit_project', project_id=project.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input class="form-control" name="name" maxlength="250" aria-label="Project name" value="{{ project.name }}" required>
+                <button class="btn btn-sm btn-outline-primary">Save</button>
+              </form></td>
+              <td>{{ project.sites|length }}</td>
+              <td><form method="post" action="{{ url_for('main.delete_project', project_id=project.id) }}" onsubmit="return confirm('Delete this project?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-danger" {% if project.sites %}disabled title="Project is assigned to sites"{% endif %}>Delete</button>
+              </form></td>
+            </tr>
+            {% else %}<tr><td class="text-secondary" colspan="3">No projects yet.</td></tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

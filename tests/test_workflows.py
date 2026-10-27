@@ -14,7 +14,7 @@ from geosite import create_app
 from geosite.attendance import as_utc, close_overdue_visits, daily_cutoff
 from geosite.timeutils import INDIA_TIME, india_date
 from geosite.extensions import db
-from geosite.models import AssignedSite, Attendance, AuditLog, Invoice, LeaveRequest, SiteAssignment, SiteReport, User
+from geosite.models import AssignedSite, Attendance, AuditLog, Invoice, LeaveRequest, Project, REPORT_COMPANY_NAME, SiteAssignment, SiteReport, User
 
 
 class WorkflowTests(unittest.TestCase):
@@ -48,7 +48,8 @@ class WorkflowTests(unittest.TestCase):
             designation="Field Engineer",
         )
         self.employee.set_password("engineer-password-123")
-        db.session.add_all([self.admin, self.employee])
+        self.project = Project(name="Project Two")
+        db.session.add_all([self.admin, self.employee, self.project])
         db.session.flush()
         self.site = AssignedSite(
             site_name="North Site",
@@ -91,7 +92,7 @@ class WorkflowTests(unittest.TestCase):
     def test_activity_excel_layout_billing_leave_and_missing_dates(self):
         start = date(2026, 10, 19)
         self.site.project_name = "=Project text"
-        self.site.report_company = "Example Reporting Company"
+        self.site.report_company = REPORT_COMPANY_NAME
         self.site.commissioning_manager = "Commissioning Lead"
         self.site.project_manager = "Project Lead"
         self.site.report_remarks = "First remark\n=literal remark"
@@ -152,7 +153,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(sheet["C20"].value, "=literal remark")
         self.assertEqual(sheet["C20"].data_type, "s")
         self.assertIsNone(sheet["C21"].value)
-        self.assertEqual(sheet["I25"].value, "M/S Example Reporting Company")
+        self.assertEqual(sheet["I25"].value, f"M/S {REPORT_COMPANY_NAME}")
         self.assertIn("Commissioning Manager : Commissioning Lead", sheet["A26"].value)
         self.assertIn("Customer representative:", sheet["A26"].value)
         self.assertIn("Project Manager : Project Lead", sheet["E26"].value)
@@ -239,21 +240,32 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.post(url, data={}).status_code, 403)
         self.client.post("/logout")
         self.client.post("/login", data={"email": self.admin.email, "password": "admin-password-123"})
-        self.client.post(url, data={"project_name": "Commissioning", "report_company": "Company",
+        project = Project(name="Commissioning")
+        db.session.add(project)
+        db.session.commit()
+        self.client.post(url, data={"project_id": str(project.id), "report_company": "Company",
                                    "commissioning_manager": "Manager One",
                                    "project_manager": "Manager Two", "report_remarks": "One\nTwo"})
         db.session.refresh(self.site)
         self.assertEqual(self.site.project_name, "Commissioning")
-        self.assertEqual(self.site.report_company, "Company")
+        self.assertEqual(self.site.project_id, project.id)
+        self.assertEqual(self.site.report_company, REPORT_COMPANY_NAME)
         self.assertEqual(self.site.commissioning_manager, "Manager One")
         self.assertEqual(self.site.project_manager, "Manager Two")
         self.assertEqual(self.site.report_remarks, "One\nTwo")
-        for values in ({"report_remarks": "Line\n" * 6}, {"report_company": "x" * 161},
-                       {"project_manager": "x" * 121}, {"commissioning_manager": "x" * 121}):
+        for values, expected_message in (
+            ({"report_remarks": "Line\n" * 6}, b"five remarks lines"),
+            ({"project_manager": "x" * 121}, b"120 characters"),
+            ({"commissioning_manager": "x" * 121}, b"120 characters"),
+        ):
             response = self.client.post(url, data=values, follow_redirects=True)
-            self.assertIn(b"at most five remarks lines", response.data)
+            self.assertIn(expected_message, response.data)
             db.session.refresh(self.site)
-            self.assertEqual(self.site.report_company, "Company")
+            self.assertEqual(self.site.report_company, REPORT_COMPANY_NAME)
+        response = self.client.post(url, data={"project_id": "not-an-id"}, follow_redirects=True)
+        self.assertIn(b"Select a valid project", response.data)
+        db.session.refresh(self.site)
+        self.assertEqual(self.site.project_id, project.id)
 
     def test_end_to_end_visit_and_merged_report_pdf(self):
         self._login_employee()
@@ -636,12 +648,49 @@ class WorkflowTests(unittest.TestCase):
             "email": self.admin.email, "password": "admin-password-123",
         })
 
+    def test_project_list_crud_links_sites_and_is_admin_only(self):
+        response = self.client.get("/admin/projects")
+        self.assertEqual(response.status_code, 302)
+        self._login_admin()
+        response = self.client.get("/admin/projects")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Project list", response.data)
+        self.assertIn(b"Project", self.client.get("/admin/sites").data)
+
+        self.client.post("/admin/projects", data={"name": "  New Project  "})
+        project = Project.query.filter_by(name="New Project").one()
+        site_payload = self._site_payload(project_id=str(project.id))
+        response = self.client.post("/admin/sites", data=site_payload, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        site = AssignedSite.query.filter_by(site_name="South Site").one()
+        self.assertEqual(site.project_id, project.id)
+        self.assertEqual(site.project_name, "New Project")
+        self.assertEqual(site.report_company, REPORT_COMPANY_NAME)
+        self.assertIn(b"Blackpurple automation", response.data)
+
+        self.client.post(f"/admin/projects/{project.id}/edit", data={"name": "Renamed Project"})
+        db.session.refresh(site)
+        self.assertEqual(site.project_name, "Renamed Project")
+        response = self.client.post(
+            f"/admin/projects/{project.id}/delete", data={}, follow_redirects=True,
+        )
+        self.assertIn(b"cannot be deleted", response.data)
+        self.assertIsNotNone(db.session.get(Project, project.id))
+
+        self.client.post("/logout")
+        self._login_employee()
+        self.assertEqual(self.client.get("/admin/projects").status_code, 403)
+        self.assertEqual(
+            self.client.post("/admin/projects", data={"name": "Unauthorized"}).status_code,
+            403,
+        )
+
     def _site_payload(self, **updates):
         return {
             "employee_id": str(self.employee.id), "site_name": "South Site",
             "customer_name": "South Customer", "address": "2 Example Road",
             "latitude": "19", "longitude": "72", "allowed_radius": "250",
-            "project_name": "Project Two",
+            "project_id": str(self.project.id),
             "report_company": "Reporting Co", "commissioning_manager": "Commissioning Lead",
             "project_manager": "Project Lead", "report_remarks": "First\nSecond",
             **updates,
@@ -828,11 +877,14 @@ class WorkflowTests(unittest.TestCase):
         form = self.client.get(url)
         self.assertEqual(form.status_code, 200)
         for value in (b'value="South Site"', b'value="19.0"', b'Project Two',
-                      b'Reporting Co', b'First\nSecond', b'Save changes'):
+                      b'Blackpurple automation', b'First\nSecond', b'Save changes'):
             self.assertIn(value, form.data)
+        updated_project = Project(name="Updated Project")
+        db.session.add(updated_project)
+        db.session.commit()
         response = self.client.post(url, data=self._site_payload(
             site_name="South Updated", customer_name="Updated Customer", address="New Address",
-            latitude="20", longitude="73", allowed_radius="500", project_name="Updated Project",
+            latitude="20", longitude="73", allowed_radius="500", project_id=str(updated_project.id),
             report_company="Updated Company",
         ), follow_redirects=True)
         self.assertEqual(response.status_code, 200)
@@ -841,7 +893,7 @@ class WorkflowTests(unittest.TestCase):
                          ("South Updated", "Updated Customer", "New Address"))
         self.assertEqual((second.latitude, second.longitude, second.allowed_radius), (20, 73, 500))
         self.assertEqual(second.project_name, "Updated Project")
-        self.assertEqual(second.report_company, "Updated Company")
+        self.assertEqual(second.report_company, REPORT_COMPANY_NAME)
         self.assertEqual(AssignedSite.query.count(), 2)
         db.session.refresh(self.site)
         self.assertEqual(self.site.site_name, "North Site")
@@ -924,7 +976,7 @@ class WorkflowTests(unittest.TestCase):
         url = f"/admin/sites/{self.site.id}/edit"
         for payload in (self._site_payload(latitude="91"), self._site_payload(longitude="nan"),
                         self._site_payload(allowed_radius="0"),
-                        self._site_payload(site_name="x" * 161), self._site_payload(project_name="x" * 251)):
+                        self._site_payload(site_name="x" * 161), self._site_payload(project_id="invalid")):
             response = self.client.post(url, data=payload)
             self.assertEqual(response.status_code, 200)
             self.assertIn(b"Enter valid site details", response.data)

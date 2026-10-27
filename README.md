@@ -248,10 +248,13 @@ is retained; legacy reports with no billing choice are explicitly marked
 **Billing not recorded** and count as 0 in the new export, rather than assuming
 they were billable. Individual/merged PDFs remain available to admins.
 
-Admins fill **Project**, **Reporting company**, **Commissioning manager**,
-**Project manager** and up to five remarks on catalog sites, or use
-**Save report header** on existing site cards. These optional header details are
-used at export time; updating them changes future exports, not saved visits.
+Admins manage the reusable project-name list in **Projects** and select a
+project in site details. Existing site project names are transferred into this
+list by the migration. The existing **Sites** page appears as **Project** in
+admin navigation, and its **Add Project** form still creates a site entry.
+Reporting company is fixed to **Blackpurple automation**. Commissioning
+manager, project manager and up to five remarks remain optional site report
+details; updates apply to future exports.
 
 Under **Reports**, choose a site/employee and start/end dates, then **Download
 Excel**. The `SAR-R0` worksheet follows the supplied report structure:
@@ -259,7 +262,8 @@ project/customer/site/engineer headers (no PO fields), SR NO / SITE / DATE / DAY
 five numbered remarks lines, total days and three offline sign-off boxes
 (commissioning manager, project manager and engineer), retaining the supplied
 Excel layout with grayscale headers and portrait printing. The report update
-date is the UTC export date. No sample customer/company/manager data is reused.
+date is the UTC export date. Customer and manager details come from the selected
+site and employee; reporting company is always Blackpurple automation.
 Employees can export only their own sites; admins can select any site, including
 archived assignments. Dates use the completed visit's India-local checkout date.
 Admin **Export Excel** buttons open this same report form rather than a separate

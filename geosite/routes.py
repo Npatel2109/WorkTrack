@@ -34,7 +34,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from .extensions import db
 from .attendance import daily_cutoff, stop_attendance
 from .timeutils import INDIA_TIME, format_ist, india_date
-from .models import AppSettings, AssignedSite, Attendance, AttendancePolicy, AuditLog, DailyWorkStatus, Invoice, LeaveAllowanceAccount, LeaveRequest, MonthlyLeaveEntitlement, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
+from .models import AppSettings, AssignedSite, Attendance, AttendancePolicy, AuditLog, DailyWorkStatus, Invoice, LeaveAllowanceAccount, LeaveRequest, MonthlyLeaveEntitlement, Project, REPORT_COMPANY_NAME, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
 from .work_status import approved_leave_today, attendance_summary, leave_overlap, month_bounds, monthly_leave_balance
 from .services import (
     generate_invoice_pdf,
@@ -810,9 +810,17 @@ def sites(site_id=None):
                 request.form.get(key, "").strip()
                 for key in ("site_name", "customer_name", "address")
             ]
-            project_name = request.form.get("project_name", "").strip()
-            if len(project_name) > 250:
-                raise ValueError
+            project_id_value = request.form.get("project_id", "").strip()
+            project = None
+            if project_id_value:
+                try:
+                    project = Project.query.filter_by(
+                        id=int(project_id_value)
+                    ).first()
+                except ValueError:
+                    project = None
+                if project is None:
+                    raise ValueError
             signoff = _report_signoff_fields()
             if (
                 not all(details)
@@ -826,7 +834,7 @@ def sites(site_id=None):
             ):
                 raise ValueError
         except (TypeError, ValueError):
-            flash("Enter valid site details, coordinates and radius. Keep company/manager fields within their limits and remarks to five lines (2,000 characters).", "danger")
+            flash("Enter valid site details, project selection, coordinates and radius. Keep manager fields within their limits and remarks to five lines (2,000 characters).", "danger")
         else:
             if editing_site:
                 site = editing_site
@@ -843,7 +851,9 @@ def sites(site_id=None):
                     allowed_radius=radius,
                 )
                 db.session.add(site)
-            site.project_name = project_name
+            site.project = project
+            site.project_name = project.name if project else ""
+            site.report_company = REPORT_COMPANY_NAME
             for key, value in signoff.items():
                 setattr(site, key, value)
             db.session.flush()
@@ -855,7 +865,66 @@ def sites(site_id=None):
     active_sites = AssignedSite.query.filter_by(is_active=True).order_by(AssignedSite.site_name).all()
     return render_template(
         "sites.html", sites=active_sites, editing_site=editing_site, values=values,
+        projects=Project.query.order_by(Project.name).all(),
     )
+
+
+@bp.route("/admin/projects", methods=["GET", "POST"])
+@admin_required
+def projects():
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        if not name or len(name) > 250:
+            flash("Enter a project name of at most 250 characters.", "danger")
+        elif Project.query.filter(func.lower(Project.name) == name.lower()).first():
+            flash("A project with that name already exists.", "danger")
+        else:
+            project = Project(name=name)
+            db.session.add(project)
+            write_audit(current_user, "project_created", name)
+            db.session.commit()
+            flash("Project added.", "success")
+            return redirect(url_for("main.projects"))
+    return render_template(
+        "projects.html",
+        projects=Project.query.order_by(Project.name).all(),
+        values=request.form if request.method == "POST" else None,
+    )
+
+
+@bp.route("/admin/projects/<int:project_id>/edit", methods=["POST"])
+@admin_required
+def edit_project(project_id):
+    project = db.get_or_404(Project, project_id)
+    name = request.form.get("name", "").strip()
+    if not name or len(name) > 250:
+        flash("Enter a project name of at most 250 characters.", "danger")
+    elif Project.query.filter(
+        func.lower(Project.name) == name.lower(), Project.id != project.id
+    ).first():
+        flash("A project with that name already exists.", "danger")
+    else:
+        project.name = name
+        for site in project.sites:
+            site.project_name = name
+        write_audit(current_user, "project_updated", f"Project {project.id}: {name}")
+        db.session.commit()
+        flash("Project updated.", "success")
+    return redirect(url_for("main.projects"))
+
+
+@bp.route("/admin/projects/<int:project_id>/delete", methods=["POST"])
+@admin_required
+def delete_project(project_id):
+    project = db.get_or_404(Project, project_id)
+    if project.sites:
+        flash("This project is assigned to one or more sites and cannot be deleted.", "danger")
+    else:
+        write_audit(current_user, "project_deleted", project.name)
+        db.session.delete(project)
+        db.session.commit()
+        flash("Project deleted.", "success")
+    return redirect(url_for("main.projects"))
 
 
 @bp.route("/admin/assignments", methods=["GET", "POST"])
@@ -910,16 +979,15 @@ def site_assignments():
 def _report_signoff_fields():
     fields = {
         key: request.form.get(key, "").strip()
-        for key in ("report_company", "commissioning_manager", "project_manager", "report_remarks")
+        for key in ("commissioning_manager", "project_manager", "report_remarks")
     }
     if (
-        len(fields["report_company"]) > 160
-        or len(fields["commissioning_manager"]) > 120
+        len(fields["commissioning_manager"]) > 120
         or len(fields["project_manager"]) > 120
         or len(fields["report_remarks"]) > 2000
         or len(fields["report_remarks"].splitlines()) > 5
     ):
-        raise ValueError("Enter company/manager details within the field limits and at most five remarks lines (2,000 characters).")
+        raise ValueError("Enter manager details within the field limits and at most five remarks lines (2,000 characters).")
     return fields
 
 
@@ -927,15 +995,25 @@ def _report_signoff_fields():
 @admin_required
 def site_report_details(site_id):
     site = db.get_or_404(AssignedSite, site_id)
-    project = request.form.get("project_name", "").strip()
     try:
-        if len(project) > 250:
-            raise ValueError
+        project_id_value = request.form.get("project_id", "").strip()
+        project = None
+        if project_id_value:
+            try:
+                project = Project.query.filter_by(
+                    id=int(project_id_value)
+                ).first()
+            except ValueError:
+                project = None
+            if project is None:
+                raise ValueError
         signoff = _report_signoff_fields()
     except ValueError:
-        flash("Enter project (max 250 characters), company (max 160), manager names (max 120) and at most five remarks lines (max 2,000 characters).", "danger")
+        flash("Select a valid project, enter manager names within 120 characters, and use at most five remarks lines (2,000 characters).", "danger")
     else:
-        site.project_name = project
+        site.project = project
+        site.project_name = project.name if project else ""
+        site.report_company = REPORT_COMPANY_NAME
         for key, value in signoff.items():
             setattr(site, key, value)
         write_audit(current_user, "site_report_header_updated", f"Site {site.id}")

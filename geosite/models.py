@@ -5,6 +5,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from .extensions import db, login_manager
 
+REPORT_COMPANY_NAME = "Blackpurple automation"
+
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -101,6 +103,7 @@ class AssignedSite(db.Model):
     site_name = db.Column(db.String(160), nullable=False)
     customer_name = db.Column(db.String(160), nullable=False)
     project_name = db.Column(db.String(250), nullable=False, default="", server_default="")
+    project_id = db.Column(db.Integer, db.ForeignKey("project.id"), index=True)
     report_company = db.Column(db.String(160), nullable=False, default="", server_default="")
     commissioning_manager = db.Column(db.String(120), nullable=False, default="", server_default="")
     project_manager = db.Column(db.String(120), nullable=False, default="", server_default="")
@@ -114,6 +117,13 @@ class AssignedSite(db.Model):
 
     assignments = db.relationship("SiteAssignment", back_populates="site", cascade="all, delete-orphan")
     attendance_records = db.relationship("Attendance", back_populates="site")
+    project = db.relationship("Project", back_populates="sites")
+
+
+class Project(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(250), nullable=False, unique=True)
+    sites = db.relationship("AssignedSite", back_populates="project")
 
 
 class LeaveAllowanceAccount(db.Model):

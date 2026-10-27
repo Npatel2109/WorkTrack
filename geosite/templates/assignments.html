@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Assign sites{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">ENGINEER ACCESS</p><h1>Assign sites</h1><p class="text-secondary">Select an engineer, then tick their sites. A site can be shared by multiple engineers without copying its details.</p></div><a class="btn btn-outline-primary" href="{{ url_for('main.sites') }}">Site catalog</a></div>
+<div class="page-heading"><div><p class="eyebrow">ENGINEER ACCESS</p><h1>Assign sites</h1><p class="text-secondary">Select an engineer, then tick their sites. A site can be shared by multiple engineers without copying its details.</p></div><a class="btn btn-outline-primary" href="{{ url_for('main.sites') }}">Project</a></div>
 <section class="panel-card">
   <form method="get" class="mb-4">
     <label class="form-label" for="assignment-search">Search engineer</label>
@@ -31,7 +31,7 @@
       <input class="form-check-input mt-1" type="checkbox" name="site_ids" value="{{ site.id }}" {% if site.id in selected_sites %}checked{% endif %}>
       <span><strong>{{ site.site_name }}</strong><br>{{ site.customer_name }}<br><span class="small text-secondary">{{ site.address }}</span></span>
     </label>
-    {% else %}<p>No sites yet. Add a site in the site catalog first.</p>{% endfor %}
+    {% else %}<p>No sites yet. Add a project from the Project tab first.</p>{% endfor %}
     <button class="btn btn-primary mt-3">Save assignments</button>
   </form>
   {% endif %}

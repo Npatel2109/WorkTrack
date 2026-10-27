@@ -1,13 +1,18 @@
 {% extends "base.html" %}
-{% block title %}Site catalog{% endblock %}
+{% block title %}Projects and sites{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">FIELD OPERATIONS</p><h1>Site catalog</h1><p class="text-secondary mb-0">Add each site once. Assign it to any number of engineers in Assign sites.</p></div><a class="btn btn-outline-primary" href="{{ url_for('main.site_assignments') }}">Assign sites</a></div>
+<div class="page-heading"><div><p class="eyebrow">FIELD OPERATIONS</p><h1>Project</h1><p class="text-secondary mb-0">Add each project site once. Assign it to any number of engineers in Assign sites.</p></div><div class="d-flex gap-2"><a class="btn btn-outline-primary" href="{{ url_for('main.projects') }}">Project list</a><a class="btn btn-outline-primary" href="{{ url_for('main.site_assignments') }}">Assign sites</a></div></div>
 <div class="row g-4">
-  <div class="col-xl-4"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">SITE DETAILS</p><h2>{{ "Edit site" if editing_site else "Add site" }}</h2></div></div>
+  <div class="col-xl-4"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">SITE DETAILS</p><h2>{{ "Edit site" if editing_site else "Add Project" }}</h2></div></div>
     <form method="post" action="{{ url_for('main.sites', site_id=editing_site.id) if editing_site else url_for('main.sites') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label class="form-label">Site name</label><input class="form-control mb-3" name="site_name" maxlength="160" value="{{ values.site_name if values else '' }}" required>
       <label class="form-label">Customer name</label><input class="form-control mb-3" name="customer_name" maxlength="160" value="{{ values.customer_name if values else '' }}" required>
-      <label class="form-label">Project (report header)</label><input class="form-control mb-3" name="project_name" maxlength="250" value="{{ values.project_name if values else '' }}">
+      {% set selected_project_id = values.project_id if values else (editing_site.project_id if editing_site else '') %}
+      <label class="form-label" for="site-project">Project name</label>
+      <select class="form-select mb-3" id="site-project" name="project_id">
+        <option value="">No project selected</option>
+        {% for project in projects %}<option value="{{ project.id }}" {% if selected_project_id|string == project.id|string %}selected{% endif %}>{{ project.name }}</option>{% endfor %}
+      </select>
       {% set header_site = values %}{% set header_suffix = 'assignment' %}{% include "_report_signoff_fields.html" %}{% set header_suffix = none %}
       <label class="form-label" for="site-address">Address</label><textarea class="form-control" id="site-address" name="address" rows="2" required>{{ values.address if values else '' }}</textarea>
       <div class="d-flex align-items-center gap-2 mt-2 mb-2"><button class="btn btn-sm btn-outline-primary" id="find-site-address" type="button">Find address on map</button><span class="small text-secondary" id="site-map-status">Search the address or click/drag a map pin.</span></div>
@@ -18,18 +23,22 @@
       </div>
       <label class="form-label">Reference radius (meters; does not block visits)</label><input class="form-control mb-3" name="allowed_radius" type="number" min="10" max="5000" value="{{ values.allowed_radius if values else 100 }}" required>
       <p class="form-text">Site details are shared by all assigned engineers. Saved attendance coordinates and distances remain unchanged. Use Assign sites to change engineer access.</p>
-      <button class="btn btn-primary w-100">{{ "Save changes" if editing_site else "Add site" }}</button>
+      <button class="btn btn-primary w-100">{{ "Save changes" if editing_site else "Add Project" }}</button>
       {% if editing_site %}<a class="btn btn-outline-secondary w-100 mt-2" href="{{ url_for('main.sites') }}">Cancel editing</a>{% endif %}
     </form>
   </section></div>
-  <div class="col-xl-8"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">SITE CATALOG</p><h2>Sites <span class="count-badge">{{ sites|length }}</span></h2></div></div>
+  <div class="col-xl-8"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">PROJECT SITES</p><h2>Sites <span class="count-badge">{{ sites|length }}</span></h2></div></div>
     <div class="row g-3">{% for site in sites %}
       <div class="col-md-6"><article class="site-card">
         <div class="d-flex justify-content-between gap-2"><div><span class="eyebrow">{{ site.customer_name }}</span><h3>{{ site.site_name }}</h3></div><span class="status-pill assigned">{{ site.allowed_radius|int }} m</span></div>
         <p class="text-secondary small">{{ site.address }}</p><p class="small mb-3"><strong>Engineers:</strong> {% for assignment in site.assignments if assignment.is_active %}{{ assignment.employee.name }}{{ ", " if not loop.last else "" }}{% else %}Unassigned{% endfor %}<br><span class="text-secondary">{{ "%.5f"|format(site.latitude) }}, {{ "%.5f"|format(site.longitude) }}</span></p>
         <form class="mb-3" method="post" action="{{ url_for('main.site_report_details', site_id=site.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <label class="form-label" for="project-{{ site.id }}">Project</label><input class="form-control mb-2" id="project-{{ site.id }}" name="project_name" maxlength="250" value="{{ site.project_name }}">
+          <label class="form-label" for="project-{{ site.id }}">Project name</label>
+          <select class="form-select mb-2" id="project-{{ site.id }}" name="project_id">
+            <option value="">No project selected</option>
+            {% for project in projects %}<option value="{{ project.id }}" {% if site.project_id == project.id %}selected{% endif %}>{{ project.name }}</option>{% endfor %}
+          </select>
           {% set header_site = site %}{% include "_report_signoff_fields.html" %}
           <button class="btn btn-sm btn-outline-primary">Save report header</button>
         </form>

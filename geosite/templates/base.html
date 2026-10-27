@@ -23,7 +23,8 @@
           {% if current_user.is_admin %}
           <a class="nav-link" href="{{ url_for('main.admin_dashboard') }}">Dashboard</a>
           <a class="nav-link" href="{{ url_for('main.employees') }}">Employees</a>
-          <a class="nav-link" href="{{ url_for('main.sites') }}">Sites</a>
+          <a class="nav-link" href="{{ url_for('main.sites') }}">Project</a>
+          <a class="nav-link" href="{{ url_for('main.projects') }}">Projects</a>
           <a class="nav-link" href="{{ url_for('main.site_assignments') }}">Assign sites</a>
           <a class="nav-link" href="{{ url_for('main.reports') }}">Reports</a>
           <a class="nav-link" href="{{ url_for('main.submitted_reports') }}">Submitted reports</a>

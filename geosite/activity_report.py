@@ -7,6 +7,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from .models import REPORT_COMPANY_NAME
 from .timeutils import india_date
 
 
@@ -31,7 +32,7 @@ def activity_workbook(site, visits, leaves, start, end, employee, automatic_leav
     sheet["A1"].font = Font(name="Calibri", size=15, bold=True, color="FFFFFF")
     sheet["A1"].fill = PatternFill("solid", fgColor=ink)
     sheet["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    merged(3, 1, 12, f"PROJECT : {site.project_name or 'Not specified'}")
+    merged(3, 1, 12, f"PROJECT : {site.project.name if site.project else site.project_name or 'Not specified'}")
     merged(4, 1, 12, f"CUSTOMER : {site.customer_name}")
     merged(5, 1, 12, f"REPORT UPDATE DATE : {datetime.now(timezone.utc):%d %b %Y}")
     merged(6, 1, 12, f"SITE DETAIL : {site.site_name}")
@@ -97,7 +98,7 @@ def activity_workbook(site, visits, leaves, start, end, employee, automatic_leav
     sheet.merge_cells(start_row=total_row, start_column=11, end_row=total_row, end_column=12)
     sheet.cell(total_row, 11, sum(days for _, days, _ in rows))
     merged(total_row + 1, 1, 8, f"CUSTOMER : {site.customer_name}")
-    merged(total_row + 1, 9, 12, f"M/S {site.report_company}" if site.report_company else "M/S ____________________")
+    merged(total_row + 1, 9, 12, f"M/S {REPORT_COMPANY_NAME}")
     signature_start = total_row + 2
     signature_end = total_row + 6
     for first, last, label in (
