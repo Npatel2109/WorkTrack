@@ -11,13 +11,15 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from PIL import Image
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
+from pypdf.errors import PyPdfError
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import Image as PdfImage
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from werkzeug.utils import secure_filename
 
 from .extensions import db
 from .models import AuditLog
@@ -25,6 +27,7 @@ from .timeutils import format_ist
 
 EARTH_RADIUS_METERS = 6_371_000
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_REPORT_PDF_BYTES = 5 * 1024 * 1024
 DATA_URL_PATTERN = re.compile(r"^data:image/(png|jpeg);base64,([A-Za-z0-9+/=]+)$")
 
 
@@ -71,6 +74,37 @@ def save_data_image(data_url, destination):
     filename = f"{uuid.uuid4().hex}.png"
     image.save(Path(destination) / filename, format="PNG", optimize=True)
     return filename
+
+
+def save_report_pdf(upload, destination):
+    original_filename = secure_filename(upload.filename or "")
+    if not original_filename.lower().endswith(".pdf") or len(original_filename) > 255:
+        raise ValueError("Choose a PDF file with a filename of at most 255 characters.")
+    raw = upload.stream.read(MAX_REPORT_PDF_BYTES + 1)
+    if not raw:
+        raise ValueError("The PDF file is empty.")
+    if len(raw) > MAX_REPORT_PDF_BYTES:
+        raise ValueError("The PDF file exceeds the 5 MB limit.")
+    if not raw.startswith(b"%PDF-"):
+        raise ValueError("Upload a valid PDF report, not a renamed file.")
+    try:
+        reader = PdfReader(BytesIO(raw), strict=True)
+        if reader.is_encrypted:
+            raise ValueError("Password-protected PDF reports are not supported.")
+        if not len(reader.pages):
+            raise ValueError("The PDF report must contain at least one page.")
+    except PyPdfError as error:
+        raise ValueError("The PDF could not be read. Upload a valid, unencrypted PDF.") from error
+    filename = f"{uuid.uuid4().hex}.pdf"
+    path = Path(destination) / filename
+    output = path.open("xb")
+    try:
+        with output:
+            output.write(raw)
+    except OSError:
+        path.unlink(missing_ok=True)
+        raise
+    return filename, original_filename
 
 
 def write_audit(user, action, details=None, ip_address=None):

@@ -139,13 +139,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("E8:L8", str(sheet.merged_cells))
         self.assertEqual([sheet.cell(8, c).value for c in range(1, 6)],
                          ["SR NO", "SITE", "DATE", "DAY", "ACTIVITY DETAIL"])
-        self.assertEqual([sheet.cell(r, 4).value for r in range(9, 13)], [1, 0, 1, 0])
+        self.assertEqual([sheet.cell(r, 4).value for r in range(9, 13)], [1, 0, 0, 0])
         self.assertEqual(sheet["E11"].value, "=literal activity")
         self.assertEqual(sheet["E11"].data_type, "s")
         self.assertEqual(sheet["E12"].value, "Sick Leave")
         self.assertEqual(sheet["E13"].value, "No activity recorded")
         self.assertEqual(sheet["E17"].value, "Sunday")
-        self.assertEqual(sheet["K24"].value, 2)
+        self.assertEqual(sheet["K24"].value, 1)
         self.assertEqual(sheet["A18"].value, "REMARKS")
         self.assertEqual([sheet.cell(r, 1).value for r in range(19, 24)], [1, 2, 3, 4, 5])
         self.assertEqual(sheet["C19"].value, "First remark")
@@ -189,6 +189,25 @@ class WorkflowTests(unittest.TestCase):
         self.client.post("/login", data={"email": self.admin.email, "password": "admin-password-123"})
         params["employee_id"] = other.id
         self.assertEqual(self.client.get("/reports/activity.xlsx", query_string=params).status_code, 200)
+
+    def test_activity_excel_counts_multiple_visits_on_one_india_date_once(self):
+        self._completed_display_visit(datetime(2026, 10, 19, 20, tzinfo=timezone.utc))
+        self._completed_display_visit(datetime(2026, 10, 20, 3, tzinfo=timezone.utc))
+        self._login_employee()
+
+        response = self.client.get("/reports/activity.xlsx", query_string={
+            "site_id": self.site.id,
+            "start_date": "2026-10-20",
+            "end_date": "2026-10-20",
+        })
+
+        self.assertEqual(response.status_code, 200)
+        sheet = load_workbook(io.BytesIO(response.data)).active
+        self.assertEqual([sheet.cell(row, 3).value.date().isoformat() for row in (9, 10)],
+                         ["2026-10-20", "2026-10-20"])
+        self.assertEqual([sheet.cell(row, 4).value for row in (9, 10)], [1, 0])
+        total_row = next(row[0].row for row in sheet.iter_rows() if row[0].value == "TOTAL DAYS :")
+        self.assertEqual(sheet.cell(total_row, 11).value, 1)
 
     def test_admin_and_employee_excel_use_identical_layout_and_data(self):
         params = {"site_id": self.site.id, "start_date": "2026-10-19", "end_date": "2026-10-21"}
@@ -261,7 +280,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         attendance = Attendance.query.one()
         self.assertEqual(attendance.status, "onsite")
-        self.assertIn("/employee", self.client.post("/logout").location)
+        logout_response = self.client.post("/logout")
+        self.assertTrue(logout_response.location.endswith("/login"))
+        self.assertEqual(Attendance.query.one().status, "onsite")
+        self._login_employee()
 
         checkout = self.client.post(
             f"/api/visit/{attendance.id}/verify-checkout",
@@ -371,6 +393,18 @@ class WorkflowTests(unittest.TestCase):
             f"/visit/{self.site.id}/checkin", data={"selfie": self._image_data()}
         )
         return Attendance.query.one()
+
+    def test_employee_can_sign_out_with_active_site_visit(self):
+        visit = self._start_location_visit()
+
+        response = self.client.post("/logout")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.location.endswith("/login"))
+        self.assertEqual(self.client.get("/employee").status_code, 302)
+        db.session.refresh(visit)
+        self.assertEqual(visit.status, "onsite")
+        self.assertEqual(AuditLog.query.filter_by(action="logout").count(), 1)
 
     def test_outside_radius_start_and_stop_record_distances_and_fresh_location(self):
         visit = self._start_location_visit()

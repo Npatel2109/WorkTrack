@@ -7,6 +7,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from .timeutils import india_date
+
 
 def activity_workbook(site, visits, leaves, start, end, employee):
     workbook = Workbook()
@@ -40,10 +42,11 @@ def activity_workbook(site, visits, leaves, start, end, employee):
 
     by_date = defaultdict(list)
     for visit in visits:
-        by_date[visit.checkout_time.date()].append(visit)
+        by_date[india_date(visit.checkout_time)].append(visit)
     rows = []
     day = start
     while day <= end:
+        billable_day_recorded = False
         for visit in by_date[day]:
             report = visit.report
             detail = report.work_performed
@@ -56,7 +59,9 @@ def activity_workbook(site, visits, leaves, start, end, employee):
                 detail += "\n[Billing not recorded in legacy report; counted as 0]"
             elif not report.is_billable:
                 detail += "\n[Non-billable]"
-            rows.append((day, 1 if report.is_billable is True else 0, detail))
+            billable_day = report.is_billable is True and not billable_day_recorded
+            billable_day_recorded = billable_day_recorded or billable_day
+            rows.append((day, int(billable_day), detail))
         leave_rows = [leave for leave in leaves if leave.start_date <= day <= leave.end_date]
         for leave in leave_rows:
             reason = leave.reason

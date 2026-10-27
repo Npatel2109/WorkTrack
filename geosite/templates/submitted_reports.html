@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Submitted reports{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">{{ "EMPLOYEE SUBMISSIONS" if current_user.is_admin else "MY SUBMISSIONS" }}</p><h1>Submitted reports</h1><p class="text-secondary mb-0">{{ "View employee submissions, changes and every PDF version." if current_user.is_admin else "Submit PDF reports and update your dates, man-days or PDF later." }}</p></div>
+  {% if not current_user.is_admin %}<a class="btn btn-primary" href="{{ url_for('main.submitted_report_form') }}">Submit report</a>{% endif %}
+</div>
+<section class="panel-card">
+  <p class="small text-secondary">These employee-level reports are separate from site-visit reports. Man-days are entered manually, not calculated from attendance.</p>
+  <div class="table-responsive"><table class="table align-middle">
+    <thead><tr><th>Report</th>{% if current_user.is_admin %}<th>Employee</th>{% endif %}<th>Start date</th><th>End date</th><th>Total man-days</th><th>Last activity (IST)</th><th>Actions</th></tr></thead>
+    <tbody>
+      {% for report in pagination.items %}
+      {% set version = report.current_version %}
+      <tr>
+        <td><a href="{{ url_for('main.submitted_report_detail', report_id=report.id) }}">Report #{{ report.id }}</a><div class="small text-secondary">Version {{ version.revision_number }}</div></td>
+        {% if current_user.is_admin %}<td>{{ report.employee.name }}<div class="small text-secondary">{{ report.employee.email }}{{ " (inactive)" if not report.employee.is_active else "" }}</div></td>{% endif %}
+        <td class="text-nowrap">{{ version.start_date.strftime("%d %b %Y") }}</td>
+        <td class="text-nowrap">{{ version.end_date.strftime("%d %b %Y") }}</td>
+        <td>{{ version.total_mandays }}</td>
+        <td class="text-nowrap">{{ version.created_at|ist }}</td>
+        <td><div class="d-flex flex-wrap gap-2">
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.download_submitted_report', report_id=report.id, version_id=version.id) }}">Download PDF</a>
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.submitted_report_detail', report_id=report.id) }}">History</a>
+          {% if not current_user.is_admin %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.submitted_report_form', report_id=report.id) }}">Edit / replace PDF</a>{% endif %}
+        </div></td>
+      </tr>
+      {% else %}<tr><td colspan="{{ 8 if current_user.is_admin else 7 }}" class="empty-state">No submitted reports yet.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% if pagination.pages > 1 %}
+  <nav class="d-flex align-items-center gap-3 mt-3" aria-label="Submitted report pages">
+    {% if pagination.has_prev %}<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.submitted_reports', page=pagination.prev_num) }}">Previous</a>{% endif %}
+    <span class="small">Page {{ pagination.page }} of {{ pagination.pages }}</span>
+    {% if pagination.has_next %}<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.submitted_reports', page=pagination.next_num) }}">Next</a>{% endif %}
+  </nav>
+  {% endif %}
+</section>
+{% endblock %}

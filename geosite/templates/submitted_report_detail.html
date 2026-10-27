@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Submitted report #{{ report.id }}{% endblock %}
+{% block content %}
+{% set current = report.current_version %}
+<div class="page-heading">
+  <div><p class="eyebrow">SUBMITTED REPORT</p><h1>Report #{{ report.id }}</h1><p class="text-secondary mb-0">{{ report.employee.name }} - {{ report.employee.email }}</p></div>
+  <div class="d-flex flex-wrap gap-2">
+    <a class="btn btn-primary" href="{{ url_for('main.download_submitted_report', report_id=report.id, version_id=current.id) }}">Download current PDF</a>
+    {% if not current_user.is_admin %}<a class="btn btn-outline-primary" href="{{ url_for('main.submitted_report_form', report_id=report.id) }}">Edit / replace PDF</a>{% endif %}
+    <a class="btn btn-outline-secondary" href="{{ url_for('main.submitted_reports') }}">Back to submitted reports</a>
+  </div>
+</div>
+<section class="panel-card mb-4">
+  <div class="section-title"><h2>Current submission</h2></div>
+  <dl class="row mb-0">
+    <dt class="col-sm-3">Start date</dt><dd class="col-sm-9">{{ current.start_date.strftime("%d %b %Y") }}</dd>
+    <dt class="col-sm-3">End date</dt><dd class="col-sm-9">{{ current.end_date.strftime("%d %b %Y") }}</dd>
+    <dt class="col-sm-3">Total man-days</dt><dd class="col-sm-9">{{ current.total_mandays }}</dd>
+    <dt class="col-sm-3">PDF</dt><dd class="col-sm-9 text-break">{{ current.original_filename }}</dd>
+    <dt class="col-sm-3">First submitted (IST)</dt><dd class="col-sm-9">{{ report.created_at|ist }}</dd>
+    <dt class="col-sm-3">Last updated (IST)</dt><dd class="col-sm-9">{{ current.created_at|ist }}</dd>
+  </dl>
+</section>
+<section class="panel-card">
+  <div class="section-title"><h2>Submission and replacement history</h2></div>
+  <p class="small text-secondary">Every submission, PDF replacement and date/man-day edit is retained below. Previous PDFs remain downloadable.</p>
+  <div class="table-responsive"><table class="table align-middle">
+    <thead><tr><th>Version</th><th>Activity</th><th>By / date (IST)</th><th>Start date</th><th>End date</th><th>Man-days</th><th>PDF</th></tr></thead>
+    <tbody>{% for version in report.versions %}<tr>
+      <td>{{ version.revision_number }}{{ " (current)" if version.id == current.id else "" }}</td>
+      <td>{{ "Submitted" if version.revision_number == 1 else "PDF replaced / details saved" if version.pdf_replaced else "Details updated" }}</td>
+      <td>{{ report.employee.name }}<div class="small text-secondary text-nowrap">{{ version.created_at|ist }}</div></td>
+      <td class="text-nowrap">{{ version.start_date.strftime("%d %b %Y") }}</td>
+      <td class="text-nowrap">{{ version.end_date.strftime("%d %b %Y") }}</td>
+      <td>{{ version.total_mandays }}</td>
+      <td><a href="{{ url_for('main.download_submitted_report', report_id=report.id, version_id=version.id) }}">Download PDF</a><div class="small text-secondary text-break">{{ version.original_filename }}</div></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endblock %}

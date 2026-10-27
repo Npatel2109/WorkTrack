@@ -26,11 +26,14 @@ from flask import (
 from flask_login import current_user, login_required, login_user, logout_user
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func, or_
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm.exc import StaleDataError
 
 from .extensions import db
 from .attendance import daily_cutoff, stop_attendance
 from .timeutils import INDIA_TIME, format_ist, india_date
-from .models import AppSettings, AssignedSite, Attendance, AuditLog, Invoice, LeaveRequest, SiteAssignment, SiteReport, User, utcnow
+from .models import AppSettings, AssignedSite, Attendance, AuditLog, Invoice, LeaveRequest, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
 from .services import (
     generate_invoice_pdf,
     generate_site_report_pdf,
@@ -38,6 +41,7 @@ from .services import (
     merge_site_reports_pdf,
     public_base_url,
     save_data_image,
+    save_report_pdf,
     send_email,
     send_password_reset_email,
     write_audit,
@@ -467,9 +471,6 @@ def reset_password(token):
 @bp.route("/logout", methods=["POST"])
 @login_required
 def logout():
-    if not current_user.is_admin and _active_attendance():
-        flash("Complete your active site visit before signing out.", "warning")
-        return redirect(url_for("main.employee_dashboard"))
     write_audit(current_user, "logout", ip_address=request.remote_addr)
     db.session.commit()
     logout_user()
@@ -701,6 +702,7 @@ def delete_employee(user_id):
         Attendance.query.filter_by(employee_id=user_id).first()
         or Invoice.query.filter_by(employee_id=user_id).first()
         or LeaveRequest.query.filter_by(employee_id=user_id).first()
+        or SubmittedReport.query.filter_by(employee_id=user_id).first()
         or AuditLog.query.filter_by(user_id=user_id).first()
     )
     if has_history:
@@ -1292,6 +1294,154 @@ def reports():
     )
 
 
+def _submitted_report_for_user(report_id):
+    query = SubmittedReport.query.filter_by(id=report_id)
+    if not current_user.is_admin:
+        query = query.filter_by(employee_id=current_user.id)
+    return query.first_or_404()
+
+
+@bp.route("/submitted-reports")
+@login_required
+def submitted_reports():
+    query = SubmittedReport.query.options(
+        joinedload(SubmittedReport.employee), selectinload(SubmittedReport.versions)
+    )
+    if not current_user.is_admin:
+        query = query.filter_by(employee_id=current_user.id)
+    pagination = query.order_by(SubmittedReport.created_at.desc(), SubmittedReport.id.desc()).paginate(
+        per_page=20, error_out=False
+    )
+    return render_template("submitted_reports.html", pagination=pagination)
+
+
+@bp.route("/employee/submitted-reports/new", methods=["GET", "POST"])
+@bp.route("/employee/submitted-reports/<int:report_id>/edit", methods=["GET", "POST"])
+@employee_required
+def submitted_report_form(report_id=None):
+    report = _submitted_report_for_user(report_id) if report_id is not None else None
+    current = report.current_version if report else None
+    values = {
+        "start_date": current.start_date.isoformat() if current else "",
+        "end_date": current.end_date.isoformat() if current else "",
+        "total_mandays": current.total_mandays if current else "",
+        "revision_number": report.revision_number if report else "",
+    }
+
+    def render_form(status=200):
+        return render_template("submitted_report_form.html", report=report, values=values), status
+
+    if request.method == "GET":
+        return render_form()
+    values = {name: request.form.get(name, "").strip() for name in values}
+    try:
+        start = date.fromisoformat(values["start_date"])
+        end = date.fromisoformat(values["end_date"])
+        if end < start:
+            raise ValueError("The end date must be on or after the start date.")
+        if not values["total_mandays"].isascii() or not values["total_mandays"].isdecimal():
+            raise ValueError("Enter total man-days as a positive whole number.")
+        total_mandays = int(values["total_mandays"])
+        if not 1 <= total_mandays <= 2147483647:
+            raise ValueError("Total man-days must be between 1 and 2,147,483,647.")
+        if report and int(values["revision_number"]) != report.revision_number:
+            flash("This report has changed. Reload the page before editing it again.", "warning")
+            return render_form(409)
+    except ValueError as error:
+        flash(f"Invalid report details. {error}", "danger")
+        return render_form(400)
+
+    upload = request.files.get("pdf")
+    filename = None
+    if upload and upload.filename:
+        try:
+            filename, original_filename = save_report_pdf(upload, current_app.config["UPLOAD_FOLDER"])
+        except ValueError as error:
+            flash(str(error), "danger")
+            return render_form(400)
+        except OSError:
+            current_app.logger.exception("Unable to store a submitted report PDF.")
+            flash("The PDF could not be saved. Please try again.", "danger")
+            return render_form(500)
+    elif current:
+        original_filename = current.original_filename
+    else:
+        flash("Choose a PDF report to submit.", "danger")
+        return render_form(400)
+
+    if current and not filename and (
+        start, end, total_mandays
+    ) == (current.start_date, current.end_date, current.total_mandays):
+        flash("No report changes to save.", "info")
+        return redirect(url_for("main.submitted_report_detail", report_id=report.id))
+
+    committed = False
+    try:
+        if report is None:
+            report = SubmittedReport(employee_id=current_user.id, revision_number=1)
+            db.session.add(report)
+        else:
+            report.revision_number += 1
+        version = SubmittedReportVersion(
+            report=report, revision_number=report.revision_number,
+            start_date=start, end_date=end, total_mandays=total_mandays,
+            filename=filename or current.filename, original_filename=original_filename,
+            pdf_replaced=filename is not None,
+        )
+        db.session.add(version)
+        db.session.flush()
+        if current is None:
+            action = "report_submitted"
+        elif filename:
+            action = "report_pdf_replaced"
+        else:
+            action = "report_details_updated"
+        write_audit(
+            current_user, action,
+            f"Submitted report {report.id}; version {version.revision_number}; "
+            f"{start} to {end}; man-days={total_mandays}; file={original_filename}",
+            ip_address=request.remote_addr,
+        )
+        db.session.commit()
+        committed = True
+    except StaleDataError:
+        db.session.rollback()
+        flash("This report was updated elsewhere. Reload the page before editing it again.", "warning")
+        return render_form(409)
+    except SQLAlchemyError:
+        db.session.rollback()
+        raise
+    finally:
+        if filename and not committed:
+            (Path(current_app.config["UPLOAD_FOLDER"]) / filename).unlink(missing_ok=True)
+    flash("Report submitted." if current is None else "Report updated. Previous versions have been retained.", "success")
+    return redirect(url_for("main.submitted_report_detail", report_id=report.id))
+
+
+@bp.route("/submitted-reports/<int:report_id>")
+@login_required
+def submitted_report_detail(report_id):
+    return render_template("submitted_report_detail.html", report=_submitted_report_for_user(report_id))
+
+
+@bp.route("/submitted-reports/<int:report_id>/versions/<int:version_id>/download")
+@login_required
+def download_submitted_report(report_id, version_id):
+    report = _submitted_report_for_user(report_id)
+    version = SubmittedReportVersion.query.filter_by(id=version_id, report_id=report.id).first_or_404()
+    path = Path(current_app.config["UPLOAD_FOLDER"]) / version.filename
+    if not path.is_file():
+        current_app.logger.error("Missing PDF for submitted report %s, version %s.", report.id, version.id)
+        abort(404, description="The report PDF is unavailable. Please contact the administrator.")
+    response = send_file(
+        path, mimetype="application/pdf", as_attachment=True,
+        download_name=version.original_filename, max_age=0,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 def _site_history_access(employee_id):
     return or_(
         AssignedSite.assignments.any(employee_id=employee_id),
@@ -1324,7 +1474,7 @@ def download_activity_excel():
     site = query.filter(_site_history_access(employee.id)).first_or_404()
     visits = _date_filtered(
         Attendance.query.filter_by(site_id=site.id, employee_id=employee.id, status="completed")
-        .filter(Attendance.report.has()), start, end
+        .filter(Attendance.report.has()), start, end, tz=INDIA_TIME
     ).order_by(Attendance.checkout_time, Attendance.id).all()
     leaves = LeaveRequest.query.filter(
         LeaveRequest.employee_id == employee.id,

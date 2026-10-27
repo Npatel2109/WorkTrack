@@ -47,7 +47,7 @@ Open `http://127.0.0.1:5000`. Create employee accounts and assign sites after si
 | --- | --- | --- |
 | `SECRET_KEY` | Random per process | Flask session signing and CSRF protection; set a stable, secret value for deployments |
 | `DATABASE_URL` | `sqlite:///geosite.db` | SQLAlchemy URL; PostgreSQL URLs are normalized to the `psycopg` driver |
-| `UPLOAD_FOLDER` | `instance/uploads` | Private storage for selfies and signatures |
+| `UPLOAD_FOLDER` | `instance/uploads` | Private persistent storage for selfies, signatures and submitted report PDFs (including previous versions) |
 | `SESSION_TIMEOUT_MINUTES` | `60` | Idle session timeout |
 | `MAX_CONTENT_LENGTH` | `8388608` | Maximum size of a request, in bytes |
 | `COOKIE_SECURE` | `0` | Set to `1` behind HTTPS to enable secure session/remember cookies |
@@ -80,6 +80,7 @@ For password reset emails, an administrator can open **Settings ? Email (passwor
 - **Sites** is a reusable catalog: create each site once without selecting an employee. **Edit site** changes its shared customer/address, map coordinates, radius and report-header details. Edits are blocked while any engineer has an active visit at that site. Historical attendance coordinate/distance snapshots remain unchanged; displayed site names/header details use the updated catalog entry.
 - **Assign sites** is a separate tab: select an active engineer, click **Load assignments**, tick any number of catalog sites and **Save assignments**. The same site can be assigned to multiple engineers without copying its details. Saving again does not duplicate memberships. Unticking removes future start access but preserves earlier visits, reports and membership history; an active visit must be stopped before its site can be unticked.
 - Completed report review, PDF download, Excel export, selfie viewing, attendance history, and account access audit log
+- **Submitted reports**: read-only access to all employee-uploaded reports, their dates/manual man-days, complete change history, and downloads of current and previous PDF versions
 - Clickable dashboard totals that open their matching employee/site/visit/report lists
 - Invoice generation with an explicit engineer/site selection, required service dates, editable billable days, daily rate, currency, customer, and description. Optional **PO number** and **PO date** are manually entered on invoices only. Amount is calculated as `billable days × daily rate`.
 - Invoice PDFs and invoice history; invoices preserve the employee/site details if assignments later change
@@ -91,7 +92,46 @@ For password reset emails, an administrator can open **Settings ? Email (passwor
 - Start with a fresh GPS capture and live selfie, even outside the assigned site's reference radius
 - Stop with current GPS, or the last server-recorded location when GPS is unavailable; complete the activity/billing report now or later
 - Review completed visits and download site-activity Excel reports
-- PDF downloads (individual and merged) are admin-only; employee pages have no PDF controls and direct PDF URLs return access denied
+- Generated site-visit PDF downloads (individual and merged) are admin-only. Employee-uploaded PDFs in **Submitted reports** can be downloaded by their owner and admins.
+- **Submitted reports**: submit an employee-level PDF with start/end dates and manually entered whole-number man-days; edit the dates/man-days or replace the PDF later
+
+### Employee-submitted PDF reports
+
+Apply the latest migration before restarting web workers:
+
+```powershell
+.\.venv\Scripts\python.exe -m flask --app wsgi db upgrade
+```
+
+Both roles have a **Submitted reports** navigation tab, separate from generated
+site-visit reports. Employees select **Submit report**, enter an inclusive start/end
+date range and a positive whole-number **Total man-days**, then upload a PDF.
+No site selection or site assignment is required. Man-days are manual, not
+calculated from attendance or capped by the number of dates selected.
+
+Uploads must be readable, unencrypted PDFs with at least one page, up to 5 MB
+each (the configured request-size limit also applies). File contents are checked;
+renaming another file to `.pdf` is not sufficient. Files use generated private
+storage names; downloads retain a sanitized original filename.
+
+Employees can use **Edit / replace PDF** to change dates/man-days, replace the
+PDF, or both. Leaving the replacement upload blank keeps the current PDF.
+Every change creates a retained version with its timestamp, dates, man-days
+and PDF reference; changing details alone does not duplicate the file.
+Unchanged submissions do not create extra versions. Conflicting/stale edits
+are rejected with a prompt to reload rather than overwrite newer changes.
+
+Employees can view and download only their own submissions and versions.
+Admins can see every employee's reports and full submission/replacement/edit
+history, and download any version, but cannot create or edit an employee's
+submission. The list is paginated, with history available from each report.
+Actions also appear in the existing administrator audit log. Deactivating an
+employee preserves their reports and downloads for admins.
+
+Back up the database **and** the persistent private `UPLOAD_FOLDER` together.
+Previous PDFs are intentionally retained, so plan storage accordingly.
+The new migration creates empty tables and does not change existing visit
+reports or their download permissions.
 
 The sign-in password field includes a **Show / Hide** button; it starts hidden.
 PO number/date are not collected on catalog sites or included in activity Excel
@@ -315,6 +355,7 @@ Attendance regression checks (JavaScript tests use Node.js's built-in runner):
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p test_workflows.py -v
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p test_attendance_migration.py -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_submitted_reports.py -v
 node --test tests\location_workflow.test.js
 node --test tests\login_visibility.test.js
 ```

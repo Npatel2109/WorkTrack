@@ -192,6 +192,48 @@ class AuditLog(db.Model):
     user = db.relationship("User")
 
 
+class SubmittedReport(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    revision_number = db.Column(db.Integer, nullable=False, default=1)
+
+    employee = db.relationship("User")
+    versions = db.relationship(
+        "SubmittedReportVersion", back_populates="report",
+        order_by="SubmittedReportVersion.revision_number.desc()",
+        cascade="all, delete-orphan",
+    )
+
+    __mapper_args__ = {"version_id_col": revision_number}
+
+    @property
+    def current_version(self):
+        return self.versions[0]
+
+
+class SubmittedReportVersion(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey("submitted_report.id"), nullable=False, index=True)
+    revision_number = db.Column(db.Integer, nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    total_mandays = db.Column(db.Integer, nullable=False)
+    filename = db.Column(db.String(40), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    pdf_replaced = db.Column(db.Boolean, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    report = db.relationship("SubmittedReport", back_populates="versions")
+
+    __table_args__ = (
+        db.UniqueConstraint("report_id", "revision_number", name="uq_submitted_report_revision"),
+        db.CheckConstraint("revision_number >= 1", name="submitted_report_valid_revision"),
+        db.CheckConstraint("end_date >= start_date", name="submitted_report_date_order"),
+        db.CheckConstraint("total_mandays >= 1", name="submitted_report_positive_mandays"),
+    )
+
+
 class Invoice(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     invoice_number = db.Column(db.String(40), unique=True, nullable=False, index=True)
