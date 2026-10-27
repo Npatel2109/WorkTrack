@@ -16,6 +16,15 @@ depends_on = None
 def upgrade():
     bind = op.get_bind()
     inspector = sa.inspect(bind)
+    has_sites = inspector.has_table("assigned_sites")
+    has_batch_table = inspector.has_table("_alembic_tmp_assigned_sites")
+    if has_batch_table:
+        if has_sites:
+            op.drop_table("_alembic_tmp_assigned_sites")
+        else:
+            op.rename_table("_alembic_tmp_assigned_sites", "assigned_sites")
+
+    inspector = sa.inspect(bind)
     if not inspector.has_table("project"):
         op.create_table(
             "project",

@@ -59,6 +59,10 @@ class ProjectMigrationTests(unittest.TestCase):
                     db.session.execute(text(
                         "INSERT INTO project (id, name) VALUES (10, 'Legacy project')"
                     ))
+                    db.session.execute(text("""
+                        CREATE TABLE _alembic_tmp_assigned_sites AS
+                        SELECT * FROM assigned_sites
+                    """))
                     db.session.commit()
 
                     upgrade(directory=migrations)
