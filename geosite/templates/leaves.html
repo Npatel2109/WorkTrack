@@ -40,7 +40,7 @@
     <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Apply filters</button><a class="btn btn-outline-secondary" href="{{ url_for('main.admin_leaves' if current_user.is_admin else 'main.employee_leaves') }}">Reset filters</a></div>
   </form>
   <div class="mt-4"><span class="stat-label">Total leaves taken (days)</span><div class="stat-value" id="leave-total">{{ "%g"|format(leave_total) }}</div></div>
-  <p class="form-text">Approved leave only, through today (UTC). Half days count as 0.5. Only days inside the selected range count, including weekends. Blank dates mean no date limit. Future, pending and rejected leave do not count. Status tabs filter the request list, not these totals.</p>
+  <p class="form-text">Approved leave through today (UTC), plus automatic leave after the 23:59 IST cutoff on Monday-Saturday. Half days count as 0.5; approved leave is not counted twice. Only days inside the selected range count. Blank dates mean no date limit. Future, pending and rejected leave requests do not count. Status tabs filter requests, not these totals. Pending/rejected work confirmations still count as automatic leave after cutoff.</p>
   {% if current_user.is_admin %}
   <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Employee</th><th>Leaves taken (days)</th></tr></thead><tbody>
     {% for employee, total in employee_totals %}<tr><td>{{ employee.name }}<div class="small text-secondary">{{ employee.email }}</div></td><td>{{ "%g"|format(total) }}</td></tr>
@@ -48,6 +48,14 @@
   </tbody></table></div>
   {% endif %}
 </section>
+{% if automatic_leave_rows %}
+<section class="panel-card mb-4">
+  <div class="section-title"><h2>Automatic leave</h2></div>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr>{% if current_user.is_admin %}<th>Employee</th>{% endif %}<th>Date (IST)</th><th>Days</th><th>Reason</th></tr></thead><tbody>
+    {% for employee, item in automatic_leave_rows %}<tr>{% if current_user.is_admin %}<td>{{ employee.name }}</td>{% endif %}<td>{{ item.date.strftime("%d %b %Y") }}</td><td>{{ "%g"|format(item.days) }}</td><td>No site visit or approved work confirmation at the daily cutoff.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
 <section class="panel-card">
   <div class="section-title"><h2>{{ "Leave requests" if current_user.is_admin else "My requests" }}</h2></div>
   {% if selected_status == 'today' %}<p class="small text-secondary">Approved leave covering today (UTC), including morning and afternoon half days. Each employee is counted once on the dashboard.</p>{% endif %}

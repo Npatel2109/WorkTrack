@@ -9,7 +9,7 @@
     <div class="d-flex flex-wrap justify-content-center gap-2 mt-3"><button class="btn btn-outline-primary" id="start-camera" type="button">Enable camera</button><button class="btn btn-primary" id="capture-photo" type="button" disabled>Capture selfie</button><button class="btn btn-outline-secondary d-none" id="retake-photo" type="button">Retake</button></div>
     <form id="checkin-form" method="post" action="{{ url_for('main.complete_checkin', site_id=site.id) }}" class="mt-3">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="selfie" id="selfie-data">
-      <button class="btn btn-success btn-lg w-100" id="submit-checkin" type="submit" disabled>Confirm check-in</button>
+      <button class="btn btn-success btn-lg w-100" id="submit-checkin" type="submit" disabled>Confirm &amp; Start Site</button>
     </form><p class="small text-center text-secondary mt-3 mb-0">The captured image is stored with your attendance record.</p>
   </section>
 </div>

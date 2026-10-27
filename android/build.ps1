@@ -30,8 +30,11 @@ $sources = @(Get-ChildItem -LiteralPath (Join-Path $project "src") -Recurse -Fil
 Invoke-BuildTool "javac" (@("-encoding", "UTF-8", "--release", "8", "-classpath", $platform, "-d", $classes) + $sources)
 $testClasses = Join-Path $build "test-classes"
 New-Item -ItemType Directory -Path $testClasses -Force | Out-Null
-Invoke-BuildTool "javac" @("--release", "8", "-classpath", $classes, "-d", $testClasses, (Join-Path $project "tests\ServerAddressTest.java"))
-Invoke-BuildTool "java" @("-classpath", "$classes;$testClasses", "com.worktrack.mobile.ServerAddressTest")
+$testSources = @(Get-ChildItem -LiteralPath (Join-Path $project "tests") -Filter "*Test.java" | ForEach-Object { $_.FullName })
+Invoke-BuildTool "javac" (@("--release", "8", "-classpath", $classes, "-d", $testClasses) + $testSources)
+foreach ($test in $testSources) {
+    Invoke-BuildTool "java" @("-classpath", "$classes;$testClasses", ("com.worktrack.mobile." + [IO.Path]::GetFileNameWithoutExtension($test)))
+}
 $classFiles = @(Get-ChildItem -LiteralPath $classes -Recurse -Filter "*.class" | ForEach-Object { $_.FullName })
 Invoke-BuildTool (Join-Path $tools "d8.bat") (@("--lib", $platform, "--min-api", "26", "--output", $build) + $classFiles)
 Invoke-BuildTool "jar" @("uf", $unsigned, "-C", $build, "classes.dex")

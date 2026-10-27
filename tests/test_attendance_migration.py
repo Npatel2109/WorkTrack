@@ -5,6 +5,7 @@ from pathlib import Path
 
 from flask_migrate import downgrade, upgrade
 from sqlalchemy import inspect, text
+from sqlalchemy.orm import defer
 
 from geosite import create_app
 from geosite.extensions import db
@@ -116,12 +117,12 @@ class AttendanceMigrationTests(unittest.TestCase):
                     })
                     db.session.commit()
                     upgrade(directory=migrations, revision="c26d7e8f9a05")
-                    completed = db.session.get(Attendance, 1)
+                    completed = db.session.get(Attendance, 1, options=[defer(Attendance.site_radius_m)])
                     self.assertEqual(completed.checkout_lon, 72.02)
                     self.assertEqual(completed.checkout_location_source, "legacy")
                     self.assertEqual(completed.site_latitude, 19)
                     self.assertIsNone(completed.checkin_distance_m)
-                    active = db.session.get(Attendance, 2)
+                    active = db.session.get(Attendance, 2, options=[defer(Attendance.site_radius_m)])
                     self.assertEqual(active.last_location_lon, 72.01)
                     self.assertEqual(active.last_location_time, active.checkin_time)
                     self.assertFalse(active.auto_closed)
@@ -130,7 +131,9 @@ class AttendanceMigrationTests(unittest.TestCase):
                     columns = {column["name"] for column in inspect(db.engine).get_columns("attendance")}
                     self.assertNotIn("last_location_time", columns)
                     upgrade(directory=migrations, revision="c26d7e8f9a05")
-                    self.assertEqual(db.session.get(Attendance, 1).checkout_lon, 72.02)
+                    self.assertEqual(db.session.get(
+                        Attendance, 1, options=[defer(Attendance.site_radius_m)]
+                    ).checkout_lon, 72.02)
                 finally:
                     db.session.remove()
                     db.engine.dispose()

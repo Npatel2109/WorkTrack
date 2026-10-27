@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
+import android.app.NotificationManager;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
@@ -12,6 +13,8 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Bundle;
+import android.os.Build;
+import android.os.SystemClock;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
@@ -36,11 +39,16 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.io.ByteArrayInputStream;
+import java.util.ArrayList;
+import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
     private static final int CAMERA_REQUEST = 10;
     private static final int LOCATION_REQUEST = 11;
     private static final int FILE_REQUEST = 12;
+    private static final int MONITOR_PERMISSION_REQUEST = 13;
     private final String server = AppConfig.SERVER;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable retry = this::retryConnection;
@@ -54,6 +62,22 @@ public class MainActivity extends Activity {
     private String lastUrl;
     private boolean pageFailed;
     private ValueCallback<Uri[]> fileCallback;
+    private final ExecutorService monitorNetwork = Executors.newSingleThreadExecutor();
+    private TextView monitorStatus;
+    private VisitSnapshot pendingVisit;
+    private boolean foreground;
+    private boolean monitorSyncRunning;
+    private boolean monitorPermissionAsked;
+    private boolean monitorPermissionPending;
+    private boolean monitorDestroyed;
+    private int navigationGeneration;
+    private final Runnable monitorPoll = new Runnable() {
+        @Override public void run() {
+            if (!foreground || monitorDestroyed) return;
+            syncVisit();
+            handler.postDelayed(this, 10_000);
+        }
+    };
 
     @Override
     public void onCreate(Bundle state) {
@@ -106,11 +130,19 @@ public class MainActivity extends Activity {
             if (webView.canGoBack()) webView.goBack();
         }));
         toolbar.addView(button("Reload", view -> retryConnection()));
+        toolbar.addView(button("Reminders", view -> {
+            monitorPermissionAsked = false;
+            syncVisit();
+        }));
         root.addView(toolbar);
         status = new TextView(this);
         status.setPadding(12, 4, 12, 4);
         status.setText("Loading WorkTrack...");
         root.addView(status);
+        monitorStatus = new TextView(this);
+        monitorStatus.setPadding(12, 4, 12, 4);
+        monitorStatus.setText(VisitMonitorService.status());
+        root.addView(monitorStatus);
         FrameLayout content = new FrameLayout(this);
         webView = new WebView(this);
         content.addView(webView, new FrameLayout.LayoutParams(-1, -1));
@@ -141,6 +173,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                navigationGeneration++;
                 pageFailed = false;
                 if (sameOrigin(url)) lastUrl = url;
                 status.setText("Loading WorkTrack...");
@@ -159,6 +192,7 @@ public class MainActivity extends Activity {
                 if (pageFailed) showOffline();
                 else showOnline();
                 CookieManager.getInstance().flush();
+                if (sameOrigin(url)) syncVisit();
             }
 
             @Override
@@ -335,6 +369,93 @@ public class MainActivity extends Activity {
         webView.loadUrl(lastUrl != null ? lastUrl : server + "/login");
     }
 
+    private void syncVisit() {
+        if (!foreground || monitorDestroyed || monitorSyncRunning || !sameOrigin(webView.getUrl())) return;
+        monitorStatus.setText(VisitMonitorService.status());
+        final String cookie = CookieManager.getInstance().getCookie(server + "/api/employee/active-visit");
+        final int requestNavigation = navigationGeneration;
+        final long requestStarted = SystemClock.elapsedRealtime();
+        monitorSyncRunning = true;
+        monitorNetwork.execute(() -> {
+            MonitorApi.Result result = null;
+            try {
+                result = MonitorApi.activeVisit(cookie);
+            } catch (Exception ignored) {
+                // API failures must not be interpreted as a stopped visit or logged with credentials.
+            }
+            final MonitorApi.Result response = result;
+            handler.post(() -> {
+                monitorSyncRunning = false;
+                if (monitorDestroyed || !foreground || !sameOrigin(webView.getUrl())
+                        || requestNavigation != navigationGeneration
+                        || !MonitorRules.freshResponse(requestStarted, SystemClock.elapsedRealtime())
+                        || !Objects.equals(cookie, CookieManager.getInstance()
+                            .getCookie(server + "/api/employee/active-visit"))) return;
+                if (response == null || response.status != 200) {
+                    pendingVisit = null;
+                    monitorStatus.setText(VisitMonitorService.status()
+                        + " Visit sync unavailable; an existing monitor continues until stop/cutoff.");
+                    return;
+                }
+                pendingVisit = response.visit;
+                if (pendingVisit == null || pendingVisit.cutoff <= System.currentTimeMillis()) {
+                    VisitMonitorService.stopForInactiveVisit(this);
+                    monitorStatus.setText("No active visit monitoring.");
+                    return;
+                }
+                ensureVisitMonitoring();
+            });
+        });
+    }
+
+    private void ensureVisitMonitoring() {
+        if (!foreground || pendingVisit == null || monitorPermissionPending) return;
+        ArrayList<String> missing = new ArrayList<>();
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.ACCESS_FINE_LOCATION);
+            missing.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+        }
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (!missing.isEmpty()) {
+            monitorStatus.setText("Active visit: reminders OFF. Allow precise location and notifications. Tap Reminders to retry.");
+            // Avoid overlapping the WebView's location/camera permission prompts.
+            if (!monitorPermissionAsked && locationCallback == null && cameraRequest == null) {
+                monitorPermissionAsked = true;
+                monitorPermissionPending = true;
+                new AlertDialog.Builder(this).setTitle("Active visit reminders")
+                    .setMessage("WorkTrack uses precise location in a visible foreground service during your active visit, even after sign-out. It checks once a minute and reminds you only outside the site's allowed radius. Location stays on this device. Stop the visit to stop monitoring; it also stops at the daily cutoff.")
+                    .setPositiveButton("Continue", (dialog, which) -> {
+                        if (foreground) {
+                            requestPermissions(missing.toArray(new String[0]), MONITOR_PERMISSION_REQUEST);
+                        } else {
+                            monitorPermissionPending = false;
+                        }
+                    })
+                    .setNegativeButton("Not now", (dialog, which) -> monitorPermissionPending = false)
+                    .setOnCancelListener(dialog -> monitorPermissionPending = false).show();
+            }
+            return;
+        }
+        NotificationManager notifications = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (!notifications.areNotificationsEnabled()
+                || (notifications.getNotificationChannel("visit_tracking") != null
+                    && notifications.getNotificationChannel("visit_tracking").getImportance() == NotificationManager.IMPORTANCE_NONE)
+                || (notifications.getNotificationChannel("outside_site") != null
+                    && notifications.getNotificationChannel("outside_site").getImportance() == NotificationManager.IMPORTANCE_NONE)) {
+            monitorStatus.setText("Active visit: reminders OFF. Enable WorkTrack notifications and both reminder/tracking channels in Android settings.");
+            return;
+        }
+        try {
+            startForegroundService(VisitMonitorService.intent(this, pendingVisit));
+            monitorStatus.setText(VisitMonitorService.status());
+        } catch (SecurityException | IllegalStateException error) {
+            monitorStatus.setText("Active visit: reminders OFF. Keep WorkTrack open and enable precise location and notifications in Android settings.");
+        }
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -353,6 +474,11 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
+        if (code == MONITOR_PERMISSION_REQUEST) {
+            monitorPermissionPending = false;
+            // Refresh the authenticated visit after the dialog; never start from a stale account snapshot.
+            syncVisit();
+        }
         if (code == CAMERA_REQUEST && cameraRequest != null) {
             if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED
                 && sameOrigin(cameraRequest.getOrigin().toString())) {
@@ -381,6 +507,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        foreground = false;
+        handler.removeCallbacks(monitorPoll);
         if (webView != null) webView.onPause();
         super.onPause();
     }
@@ -389,10 +517,16 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (webView != null) webView.onResume();
+        foreground = true;
+        handler.removeCallbacks(monitorPoll);
+        handler.post(monitorPoll);
     }
 
     @Override
     protected void onDestroy() {
+        monitorDestroyed = true;
+        handler.removeCallbacks(monitorPoll);
+        monitorNetwork.shutdownNow();
         handler.removeCallbacks(retry);
         if (cameraRequest != null) cameraRequest.deny();
         if (locationCallback != null) locationCallback.invoke(locationOrigin, false, false);

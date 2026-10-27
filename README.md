@@ -261,7 +261,7 @@ five numbered remarks lines, total days and three offline sign-off boxes
 Excel layout with grayscale headers and portrait printing. The report update
 date is the UTC export date. No sample customer/company/manager data is reused.
 Employees can export only their own sites; admins can select any site, including
-archived assignments. Dates use the completed visit's UTC checkout date.
+archived assignments. Dates use the completed visit's India-local checkout date.
 Admin **Export Excel** buttons open this same report form rather than a separate
 raw-data spreadsheet. Admins select an employee first, then one of that employee's
 sites and the date range. Both roles use the same workbook generator and layout;
@@ -270,8 +270,9 @@ the selector. Each export is scoped to the selected engineer's visits and leave,
 even when several engineers share one site. Unassigned engineers can still
 export their own historical activity but cannot start new visits there.
 
-Each completed billable visit is a separate 1-day row; non-billable visits are 0.
-Multiple billable visits on a date each count as 1, as requested. Approved leave
+Each completed visit keeps its own activity row; non-billable visits are 0.
+Only the first billable visit per engineer/site/India-local date counts as 1;
+additional billable visits on that date count as 0. Approved leave
 is 0 with the employee's reason (including half-day labels); pending/rejected
 leave is excluded. Leave is employee-wide and appears even if a visit also exists
 that date. Empty dates show 0 and **Sunday** on Sundays or **No activity recorded**
@@ -280,7 +281,70 @@ assignment periods are not inferred: choose the appropriate site/date range.
 Full text is stored as Excel strings, not formulas. Sign-off areas are blank,
 not fabricated approvals or copies of signatures from unrelated visits.
 
-### Employee leave
+### Daily work confirmation and current-month attendance
+
+Apply the latest migration before restarting the app:
+
+```powershell
+python -m flask --app wsgi db upgrade
+```
+
+The employee dashboard shows **this month's** approved, pending and rejected
+leave requests, plus automatic leave dates/days. Cross-month requests count only
+their dates in the current India-calendar month. Approved + automatic days are
+shown separately from pending/rejected request days.
+
+On a day without a recorded site visit, employees choose **WFH**, **Travelling**
+or **Training** and supply a reason before **23:59 IST**. Each employee may
+submit one confirmation for today, not for another employee or a past date.
+Admins review these under **Work confirmations**, including historical pending
+requests; employees see their decision on the dashboard. Work confirmation does
+not prevent starting a site later.
+
+At/after 23:59 IST on Monday-Saturday, an employee with no site start that day
+and no approved work confirmation is counted as automatic leave. Pending and
+rejected confirmations do not prevent it. Approved leave is not double-counted;
+an approved half-day covers 0.5 and only the uncovered 0.5 is automatic.
+Approval of a pending work confirmation removes its date's automatic leave.
+Sundays do not generate automatic leave. No holidays are inferred.
+
+Automatic leave is derived from these persisted records when the dashboard or
+admin summary is viewed; no nightly scheduler is required and missed page views
+do not skip days. The policy begins on the migration's India-local activation
+date (or the employee's creation date, if later), so it does not mark historical
+pre-upgrade days absent. This is a separate attendance summary, not a fabricated
+approved leave application. Automatic dates are also included in the existing
+employee/admin leave totals and as zero-billable-day rows in site activity Excel.
+Existing leave application/approval workflows and generated visit billing remain
+unchanged.
+
+Visit controls are now **Start Site** and **Stop Site** (including location and
+selfie confirmation screens).
+
+### Android outside-site reminders
+
+Install the updated bundled APK (1.3.0 / versionCode 5). While a site is active,
+the Android app uses a visible foreground location service and checks once per
+minute against the site's saved reference coordinates and radius. Outside-site
+notifications remind the employee to use **Stop Site**. The browser does not
+send these reminders. The app must have precise location and notification
+permission, and location services must be enabled.
+
+Monitoring continues in the background/sign-out while the visit is active and
+stops when the server confirms the site stopped or at the visit's 23:59 IST
+cutoff. Its private, signed, per-visit monitoring capability expires at cutoff;
+it cannot download reports, access account data or submit attendance. It is
+sent only as an HTTPS Authorization header, not as a URL query parameter.
+API responses are not cacheable. New visits snapshot the radius as well as the
+coordinates; legacy active visits use their site's existing reference.
+
+Android battery restrictions, force-stop, permission revocation, unavailable
+GPS/network and device power-off can interrupt tracking or notifications, so
+exact once-per-minute delivery is not guaranteed. Physical-device acceptance
+testing is required before employee distribution; the bundled APK remains
+development-signed for testing. See [Android instructions](android/README.md).
+
+### Leave applications
 
 Apply the latest migration (`flask --app wsgi db upgrade`) before starting the updated app.
 Employees can open **My leave** or the leave section on their dashboard to apply for
@@ -380,8 +444,8 @@ by `ANDROID_SERVER_URL` in `geosite/__init__.py`). Users never enter an address.
 the server is reachable the app shows live data; otherwise it shows `-` and retries
 automatically every 15 seconds (or on **Reload**/**Retry**).
 
-See [Android build and installation instructions](android/README.md). Version 1.2.0
-(versionCode 4) is bundled at `android/downloads/worktrack.apk`, so `git pull`
+See [Android build and installation instructions](android/README.md). Version 1.3.0
+(versionCode 5) is bundled at `android/downloads/worktrack.apk`, so `git pull`
 also obtains the APK. An administrator must still enable **Show "Download Android
 app" on the login page** in **Settings**. A private
 `instance/downloads/worktrack.apk` takes priority if present; replace an old private

@@ -115,6 +115,35 @@ class AssignedSite(db.Model):
     attendance_records = db.relationship("Attendance", back_populates="site")
 
 
+class AttendancePolicy(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    effective_from = db.Column(db.Date, nullable=False)
+
+
+class DailyWorkStatus(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    work_date = db.Column(db.Date, nullable=False, index=True)
+    work_type = db.Column(db.String(20), nullable=False)
+    reason = db.Column(db.String(2000), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="pending")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime(timezone=True))
+
+    employee = db.relationship("User", foreign_keys=[employee_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    __table_args__ = (
+        db.UniqueConstraint("employee_id", "work_date", name="uq_daily_work_employee_date"),
+        db.CheckConstraint("work_type IN ('wfh', 'travelling', 'training')", name="daily_work_valid_type"),
+        db.CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="daily_work_valid_status"),
+    )
+
+    @property
+    def type_label(self):
+        return {"wfh": "WFH", "travelling": "Travelling", "training": "Training"}[self.work_type]
+
+
 class SiteAssignment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
@@ -140,6 +169,7 @@ class Attendance(db.Model):
     status = db.Column(db.String(20), nullable=False, default="onsite")
     site_latitude = db.Column(db.Float)
     site_longitude = db.Column(db.Float)
+    site_radius_m = db.Column(db.Float)
     checkin_distance_m = db.Column(db.Float)
     checkout_distance_m = db.Column(db.Float)
     checkin_location_time = db.Column(db.DateTime(timezone=True))

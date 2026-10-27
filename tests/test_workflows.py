@@ -973,7 +973,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(Attendance.query.one().id, visit.id)
         self.client.post("/logout")
         self._login_employee()
-        self.assertNotIn(b"Start site visit", self.client.get("/employee").data)
+        self.assertNotIn(b"Start Site", self.client.get("/employee").data)
         self.assertEqual(self.client.post(
             f"/api/visit/{self.site.id}/verify-checkin", json={"latitude": 0, "longitude": 0}
         ).status_code, 404)

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Work confirmations{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">DAILY ATTENDANCE</p><h1>Work confirmations</h1><p class="text-secondary">Review WFH, Travelling and Training requests. Approving a date removes automatic leave for that date.</p></div></div>
+<section class="panel-card mb-4">
+  <h2 class="h4">Leave summary - {{ month_start.strftime("%B %Y") }}</h2>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Employee</th><th>Approved leave</th><th>Pending leave</th><th>Rejected leave</th><th>Automatic leave</th><th>Total leave days</th><th>Automatic dates</th></tr></thead><tbody>
+    {% for employee, summary in employee_summaries %}<tr><td>{{ employee.name }}<div class="small text-secondary">{{ employee.email }}</div></td>{% for key in ['approved', 'pending', 'rejected', 'automatic'] %}<td>{{ "%g"|format(summary.totals[key]) }}</td>{% endfor %}<td>{{ "%g"|format(summary.total_leave) }}</td><td>{% for item in summary.automatic %}<div class="text-nowrap">{{ item.date.strftime("%d %b") }} ({{ "%g"|format(item.days) }})</div>{% else %}-{% endfor %}</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="form-text">Automatic leave is computed from recorded visits, approved work confirmations and approved leave after 23:59 IST on Monday-Saturday, starting from the policy activation date. Pending/rejected work confirmations count as automatic leave until approved.</p>
+</section>
+<section class="panel-card">
+  <nav class="d-flex flex-wrap gap-2 mb-3" aria-label="Filter work confirmations">{% for value in ['all', 'pending', 'approved', 'rejected'] %}<a class="btn btn-sm {{ 'btn-primary' if selected_status == value else 'btn-outline-primary' }}" href="{{ url_for('main.admin_work_status', status=value) }}">{{ value|title }}</a>{% endfor %}</nav>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Date (IST)</th><th>Employee</th><th>Work</th><th>Reason</th><th>Status</th><th>Review</th></tr></thead><tbody>
+    {% for item in pagination.items %}<tr><td class="text-nowrap">{{ item.work_date.strftime("%d %b %Y") }}</td><td>{{ item.employee.name }}<div class="small text-secondary">{{ item.employee.email }}</div></td><td>{{ item.type_label }}</td><td class="text-break">{{ item.reason }}</td><td><span class="status-pill {{ item.status }}">{{ item.status|title }}</span></td><td>
+      {% if item.status == 'pending' %}<form method="post" action="{{ url_for('main.review_work_status', status_id=item.id) }}" class="d-flex gap-2"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-success" name="decision" value="approved">Approve</button><button class="btn btn-sm btn-outline-danger" name="decision" value="rejected">Reject</button></form>
+      {% elif item.reviewed_by %}{{ item.reviewed_by.name }}<div class="small text-secondary">{{ item.reviewed_at|ist }}</div>{% endif %}
+    </td></tr>{% else %}<tr><td colspan="6" class="empty-state">No work confirmations.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <nav class="d-flex gap-3 mt-3" aria-label="Work confirmation pages">{% if pagination.has_prev %}<a href="{{ url_for('main.admin_work_status', status=selected_status, page=pagination.prev_num) }}">Previous</a>{% endif %}<span>Page {{ pagination.page }} of {{ pagination.pages or 1 }}</span>{% if pagination.has_next %}<a href="{{ url_for('main.admin_work_status', status=selected_status, page=pagination.next_num) }}">Next</a>{% endif %}</nav>
+</section>
+{% endblock %}

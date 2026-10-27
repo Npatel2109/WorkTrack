@@ -29,7 +29,7 @@ To also update the distributable included in this repository:
 ```
 
 This writes `android/downloads/worktrack.apk`, which is downloaded to EC2 by
-`git pull`. The included version 1.2.0 (versionCode 4) is development-signed for
+`git pull`. The included version 1.3.0 (versionCode 5) is development-signed for
 testing, not a production release. Never commit signing keys.
 
 By default this creates a **development-signed APK for testing**, with a local
@@ -83,6 +83,86 @@ PDF upload/replacement uses Android's document picker restricted to PDF files.
 Cancelling returns to the form without changing its file. The server validates
 the PDF contents and size. No general device storage permission is requested.
 
+## Android active-visit outside-site reminders
+
+The app polls the authenticated native API after same-origin page navigation and
+every 10 seconds while its Activity is visible (including AJAX site actions). It
+does not scrape HTML, inject scripts or expose a JavaScript bridge. An active
+employee visit starts a **visible location foreground service**, only while the
+Activity is visible and precise location and notification permissions are granted.
+Android 14+ location foreground-service permissions/type are declared. No
+background-location permission, boot receiver or scheduled auto-start is used.
+The **Reminders** button retries permission/sync checks. Permission denial,
+approximate-only location or disabled notification channels shows reminders OFF;
+enable precise location, notifications and both channels in Android app settings.
+The service also detects revoked permissions and stops with an explanatory status.
+
+The service checks the visit and requests a fresh GPS/network fix once per minute.
+It uses the server's immutable attendance snapshot coordinates and `radius_m`,
+not the site's subsequently editable settings. Only a fresh non-mock fix whose
+accuracy circle lies completely outside the allowed radius produces a reminder.
+Inside, boundary-overlapping/uncertain and stale fixes never produce an outside
+reminder. GPS disabled/unavailable, poor accuracy and network outages are explained
+in the persistent notification; reminders are paused rather than using stale fixes.
+No coordinates are uploaded or shared. The persistent tracking notification is
+private on the lock screen, opens WorkTrack and remains visible while monitoring.
+Outside reminders repeat on the minute cadence and expire within a minute.
+Fixes predating the current location request and HTTP responses older than 30
+seconds are rejected. Activity responses from before a page navigation/account
+cookie change are discarded; old service responses cannot override a new visit.
+
+Logging out or an expired login session **does not stop an existing active visit**.
+The private service uses a visit-scoped bearer capability, not session cookies,
+to detect a stopped visit while backgrounded/signed out. A successful inactive
+response from the authenticated endpoint stops existing monitoring (including
+after switching to another employee account). The service checks remote stop once
+per minute when reachable; it suppresses outside reminders if remote status cannot
+be verified. A monitor authorization failure stops monitoring and asks the user to
+open WorkTrack. Tokens are held only in process memory, never logged, put in URLs,
+backed up, persisted or exposed to other apps. The service is not exported.
+
+The server's UTC `cutoff_time` represents the IST daily cutoff; device timezone is
+irrelevant. Every cycle/fix checks it locally, with a monotonic deadline as a
+second bound against moving the device clock backwards. A cutoff-bounded partial
+wake lock supports minute checks with the screen off and is released on stop.
+Cutoff, inactive response or authorization failure clears location requests and
+outside alerts and removes the foreground notification. Returning to the foreground
+resynchronizes an active visit; there is no tracking when no visit is active.
+
+**Limitations:** device/OEM battery restrictions, Doze, connectivity and GPS quality
+can delay checks; exact once-per-minute delivery is not an Android guarantee.
+If stop occurs offline, monitoring cannot learn about it until reconnection, but
+outside alerts stay paused and the local cutoff still bounds the visit.
+Force-stop, Android's active-app Stop, process termination and reboot can end the
+service. It deliberately does not silently restart; reopen WorkTrack to resume.
+Do not promise force-stop/reboot survival or use this as an attendance enforcement
+guarantee. Continuous active-visit location/wake-lock use consumes battery.
+
+### Native API contract
+
+Both endpoints must be HTTPS, non-redirecting JSON responses with
+`Cache-Control: no-store`; no login HTML:
+
+- `GET /api/employee/active-visit`: WebView session cookie, returns
+  `{"active":false}` or the active fields below plus `monitoring_token`.
+  Unauthenticated returns 401 (not inactive). Authenticated employees without
+  active visits return inactive, so changing employee accounts clears old tracking.
+- `GET /api/visit-monitor`: `Authorization: Bearer <monitoring_token>`, **no
+  cookie and no query-string token**. Returns inactive after stop, otherwise the
+  same active fields, without a new token. Invalid/expired capability returns 401.
+- Active fields: `active: true`, positive integer `attendance_id`, numeric
+  `latitude`, `longitude`, positive numeric `radius_m`, and `cutoff_time` as
+  ISO-8601 UTC (e.g. `2026-10-27T18:00:00Z`). All snapshot fields, including cutoff,
+  must remain unchanged for a visit; unexpected changes stop monitoring.
+- Capability is signed, scoped to attendance id and expires at that visit's
+  cutoff. It authorizes only this minimal visit-status lookup, not employee data
+  or changes. The server must check actual attendance stop status on every poll.
+  Do not log authorization headers or capability values.
+
+The build runs independent Java origin, geofence/accuracy/freshness and minute
+schedule/cutoff-boundary tests before packaging. API/device acceptance remains
+necessary; build/signature checks cannot validate Android runtime behavior.
+
 ## Device acceptance checks
 
 Build/signature verification is not a substitute for physical-device testing.
@@ -100,3 +180,24 @@ Before distributing to employees, test Android 8+ and a recent Android device:
   the PDF and download both current and previous versions as owner/admin.
 - Engineer assignment search, long names/emails wrapping, and scrolling on a
   small screen; sign out with an active visit and resume after signing back in.
+- Start an employee visit: grant precise location and notifications; confirm
+  visible persistent location notification, inside-site silence and an outside
+  reminder once per minute beyond the configured radius (not a hardcoded radius).
+- Repeat with screen locked/backgrounded and after logout/session expiration.
+  Stop from another browser/device: service and alerts disappear within the next
+  successful minute poll. Sign in as a different employee without an active visit:
+  old monitoring stops. Sign in as one with a visit: snapshot switches.
+- Edit site coordinates/radius during a visit: the current visit keeps its
+  immutable snapshot. Test a new visit separately.
+- Disable GPS, revoke precise permission, grant approximate only, deny
+  notifications/disable either channel, use a stale/uncertain location and lose
+  internet: verify clear unavailable/OFF status and no stale outside alerts.
+  Restore settings, reopen WorkTrack/tap Reminders and check recovery.
+- Cross the server's IST cutoff while signed out/backgrounded (also change device
+  timezone and move its clock backwards): no later location/reminder, foreground
+  notification clears. Verify expired/invalid monitor authorization fails safely.
+- Swipe away the Activity, test OEM battery saver/Doze, Android active-app Stop,
+  force-stop and reboot. Record actual behavior; reopen to resume active visits.
+- Verify Android 14/15 service start while visible, permission denial without
+  crashes/silent success, notifications private on the lock screen, and no token
+  in request URLs, logs, exported components or downloads.

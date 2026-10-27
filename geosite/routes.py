@@ -26,14 +26,15 @@ from flask import (
 from flask_login import current_user, login_required, login_user, logout_user
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import func, or_
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.orm.exc import StaleDataError
 
 from .extensions import db
 from .attendance import daily_cutoff, stop_attendance
 from .timeutils import INDIA_TIME, format_ist, india_date
-from .models import AppSettings, AssignedSite, Attendance, AuditLog, Invoice, LeaveRequest, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
+from .models import AppSettings, AssignedSite, Attendance, AttendancePolicy, AuditLog, DailyWorkStatus, Invoice, LeaveRequest, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
+from .work_status import attendance_summary, month_bounds
 from .services import (
     generate_invoice_pdf,
     generate_site_report_pdf,
@@ -709,6 +710,7 @@ def delete_employee(user_id):
         Attendance.query.filter_by(employee_id=user_id).first()
         or Invoice.query.filter_by(employee_id=user_id).first()
         or LeaveRequest.query.filter_by(employee_id=user_id).first()
+        or DailyWorkStatus.query.filter_by(employee_id=user_id).first()
         or SubmittedReport.query.filter_by(employee_id=user_id).first()
         or AuditLog.query.filter_by(user_id=user_id).first()
     )
@@ -900,6 +902,9 @@ def delete_site(site_id):
 @bp.route("/employee")
 @employee_required
 def employee_dashboard():
+    today = india_date(utcnow())
+    start, end = month_bounds(today)
+    summary = attendance_summary(current_user, start, end)
     reports = (
         Attendance.query.filter_by(employee_id=current_user.id, status="completed")
         .order_by(Attendance.checkout_time.desc())
@@ -915,9 +920,83 @@ def employee_dashboard():
         pending_visits=Attendance.query.filter_by(employee_id=current_user.id, status="report_pending")
         .order_by(Attendance.checkout_time.desc()).all(),
         reports=reports,
-        leave_requests=LeaveRequest.query.filter_by(employee_id=current_user.id)
-        .order_by(LeaveRequest.created_at.desc()).limit(5).all(),
+        monthly_summary=summary, month_start=start, month_end=end, today=today,
+        today_confirmation=DailyWorkStatus.query.filter_by(employee_id=current_user.id, work_date=today).first(),
     )
+
+
+@bp.route("/employee/work-status", methods=["POST"])
+@employee_required
+def submit_work_status():
+    now = utcnow()
+    today = india_date(now)
+    if now >= daily_cutoff(now):
+        flash("Today's confirmation deadline (23:59 IST) has passed.", "danger")
+        return redirect(url_for("main.employee_dashboard"))
+    work_type = request.form.get("work_type", "")
+    reason = request.form.get("reason", "").strip()
+    if work_type not in ("wfh", "travelling", "training") or not 1 <= len(reason) <= 2000:
+        flash("Select WFH, Travelling or Training and enter a reason of 1 to 2,000 characters.", "danger")
+        return redirect(url_for("main.employee_dashboard"))
+    lower = datetime.combine(today, datetime.min.time(), tzinfo=INDIA_TIME).astimezone(timezone.utc)
+    if Attendance.query.filter(Attendance.employee_id == current_user.id, Attendance.checkin_time >= lower).first():
+        flash("A site visit is already recorded today; no non-site confirmation is needed.", "warning")
+        return redirect(url_for("main.employee_dashboard"))
+    item = DailyWorkStatus(employee_id=current_user.id, work_date=today, work_type=work_type, reason=reason)
+    db.session.add(item)
+    try:
+        db.session.flush()
+    except IntegrityError:
+        db.session.rollback()
+        if not DailyWorkStatus.query.filter_by(employee_id=current_user.id, work_date=today).first():
+            raise
+        flash("Today's work status has already been submitted.", "warning")
+    else:
+        write_audit(current_user, "work_status_submitted", f"{today}: {item.type_label}; reason={reason}")
+        db.session.commit()
+        flash("Work status submitted for administrator approval.", "success")
+    return redirect(url_for("main.employee_dashboard"))
+
+
+@bp.route("/admin/work-status")
+@admin_required
+def admin_work_status():
+    today = india_date(utcnow())
+    start, end = month_bounds(today)
+    status = request.args.get("status", "all")
+    if status not in ("all", "pending", "approved", "rejected"):
+        abort(400)
+    query = DailyWorkStatus.query.options(joinedload(DailyWorkStatus.employee))
+    if status != "all":
+        query = query.filter_by(status=status)
+    pagination = query.order_by(DailyWorkStatus.work_date.desc(), DailyWorkStatus.id.desc()).paginate(
+        per_page=30, error_out=False
+    )
+    employees = User.query.filter_by(role="employee").order_by(User.name).all()
+    return render_template(
+        "work_status.html", pagination=pagination, selected_status=status,
+        month_start=start,
+        employee_summaries=[(employee, attendance_summary(employee, start, end)) for employee in employees],
+    )
+
+
+@bp.route("/admin/work-status/<int:status_id>/review", methods=["POST"])
+@admin_required
+def review_work_status(status_id):
+    item = db.get_or_404(DailyWorkStatus, status_id)
+    decision = request.form.get("decision")
+    if decision not in ("approved", "rejected"):
+        abort(400)
+    changed = DailyWorkStatus.query.filter_by(id=item.id, status="pending").update({
+        "status": decision, "reviewed_by_id": current_user.id, "reviewed_at": utcnow(),
+    })
+    if changed:
+        write_audit(current_user, f"work_status_{decision}", f"Confirmation {item.id}; {item.work_date}; {item.type_label}")
+        db.session.commit()
+        flash(f"Work status {decision}. Attendance totals now reflect this decision.", "success")
+    else:
+        flash("This work status has already been reviewed.", "warning")
+    return redirect(url_for("main.admin_work_status"))
 
 
 def _render_leaves(today, selected_status="all"):
@@ -971,6 +1050,17 @@ def _render_leaves(today, selected_status="all"):
             days = (overlap_end - overlap_start).days + 1 if leave.period == "full" else 0.5
             totals[leave.employee_id] = totals.get(leave.employee_id, 0) + days
 
+    automatic_leave_rows = []
+    policy = db.session.get(AttendancePolicy, 1)
+    if policy:
+        automatic_start = max(start, policy.effective_from) if start else policy.effective_from
+        automatic_end = min(end or india_date(utcnow()), india_date(utcnow()))
+        if automatic_start <= automatic_end:
+            for employee in employees if current_user.is_admin else [current_user]:
+                summary = attendance_summary(employee, automatic_start, automatic_end)
+                totals[employee.id] = totals.get(employee.id, 0) + summary["totals"]["automatic"]
+                automatic_leave_rows.extend((employee, item) for item in summary["automatic"])
+
     if selected_status == "today":
         query = query.filter(
             LeaveRequest.status == "approved",
@@ -989,6 +1079,7 @@ def _render_leaves(today, selected_status="all"):
         .order_by(User.name, User.id).all() if current_user.is_admin else [],
         leave_total=sum(totals.values()),
         employee_totals=[(employee, totals.get(employee.id, 0)) for employee in employees],
+        automatic_leave_rows=automatic_leave_rows,
     )
 
 
@@ -1152,6 +1243,7 @@ def complete_checkin(site_id):
         checkin_time=now,
         site_latitude=site.latitude,
         site_longitude=site.longitude,
+        site_radius_m=site.allowed_radius,
         checkin_distance_m=haversine_distance(
             site.latitude, site.longitude, verification["latitude"], verification["longitude"]
         ),
@@ -1237,6 +1329,62 @@ def capture_visit_location(attendance_id):
         return jsonify(error="This visit has stopped.", active=False), 409
     db.session.commit()
     return jsonify(recorded=True)
+
+
+def _visit_monitor_serializer():
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt="site-reminder-monitor")
+
+
+def _monitor_response(attendance, include_token=False):
+    if not attendance or attendance.status != "onsite":
+        response = jsonify(active=False)
+    else:
+        cutoff = daily_cutoff(attendance.checkin_time)
+        if utcnow() >= cutoff:
+            stop_attendance(attendance, utcnow(), automatic=True, reason="daily_cutoff")
+            db.session.commit()
+            response = jsonify(active=False)
+        else:
+            values = {
+                "active": True, "attendance_id": attendance.id,
+                "latitude": attendance.site_latitude if attendance.site_latitude is not None else attendance.site.latitude,
+                "longitude": attendance.site_longitude if attendance.site_longitude is not None else attendance.site.longitude,
+                "radius_m": attendance.site_radius_m if attendance.site_radius_m is not None else attendance.site.allowed_radius,
+                "cutoff_time": cutoff.isoformat(),
+            }
+            if include_token:
+                values["monitoring_token"] = _visit_monitor_serializer().dumps({
+                    "visit": attendance.id, "cutoff": cutoff.isoformat(),
+                })
+            response = jsonify(values)
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@bp.route("/api/employee/active-visit")
+@employee_required
+def active_visit_monitor():
+    return _monitor_response(_active_attendance(), include_token=True)
+
+
+@bp.route("/api/visit-monitor")
+def visit_monitor():
+    authorization = request.headers.get("Authorization", "")
+    try:
+        if not authorization.startswith("Bearer "):
+            raise BadSignature("A monitoring token is required.")
+        values = _visit_monitor_serializer().loads(authorization[7:], max_age=86400)
+        cutoff = datetime.fromisoformat(values["cutoff"])
+        if cutoff.tzinfo is None or utcnow() >= cutoff:
+            raise BadSignature("Monitoring token expired.")
+        attendance = db.session.get(Attendance, int(values["visit"]))
+        if not attendance or not attendance.employee.is_active or cutoff != daily_cutoff(attendance.checkin_time):
+            raise BadSignature("Invalid visit.")
+    except (BadSignature, KeyError, TypeError, ValueError):
+        response = jsonify(error="Invalid or expired visit-monitoring token.")
+        response.headers["Cache-Control"] = "private, no-store"
+        return response, 401
+    return _monitor_response(attendance)
 
 
 @bp.route("/visit/<int:attendance_id>/report", methods=["GET", "POST"])
@@ -1490,7 +1638,10 @@ def download_activity_excel():
     ).order_by(LeaveRequest.id).all()
     from .activity_report import activity_workbook
 
-    output = activity_workbook(site, visits, leaves, start, end, employee)
+    output = activity_workbook(
+        site, visits, leaves, start, end, employee,
+        automatic_leave=attendance_summary(employee, start, end)["automatic"],
+    )
     return send_file(
         output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True, download_name=f"site-activity-{site.id}-{start}-{end}.xlsx",

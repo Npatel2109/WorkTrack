@@ -10,7 +10,7 @@ from openpyxl.utils import get_column_letter
 from .timeutils import india_date
 
 
-def activity_workbook(site, visits, leaves, start, end, employee):
+def activity_workbook(site, visits, leaves, start, end, employee, automatic_leave=()):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "SAR-R0"
@@ -68,7 +68,10 @@ def activity_workbook(site, visits, leaves, start, end, employee):
             if leave.period != "full":
                 reason = f"{leave.period_label}: {reason}"
             rows.append((day, 0, reason))
-        if not by_date[day] and not leave_rows:
+        automatic_rows = [item for item in automatic_leave if item["date"] == day]
+        for item in automatic_rows:
+            rows.append((day, 0, f"Automatic leave ({item['days']:g} day): no site visit or approved work confirmation."))
+        if not by_date[day] and not leave_rows and not automatic_rows:
             rows.append((day, 0, "Sunday" if day.weekday() == 6 else "No activity recorded"))
         day += timedelta(days=1)
 
