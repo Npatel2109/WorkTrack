@@ -4,11 +4,20 @@
 <div class="page-heading"><div><p class="eyebrow">ENGINEER ACCESS</p><h1>Assign sites</h1><p class="text-secondary">Select an engineer, then tick their sites. A site can be shared by multiple engineers without copying its details.</p></div><a class="btn btn-outline-primary" href="{{ url_for('main.sites') }}">Site catalog</a></div>
 <section class="panel-card">
   <form method="get" class="mb-4">
-    <label class="form-label" for="assignment-engineer">Engineer</label>
-    <select class="form-select mb-2" id="assignment-engineer" name="employee_id" required>
-      <option value="">Select engineer</option>
-      {% for employee in employees %}<option value="{{ employee.id }}" {% if selected_employee and employee.id == selected_employee.id %}selected{% endif %}>{{ employee.name }} - {{ employee.email }}</option>{% endfor %}
-    </select>
+    <label class="form-label" for="assignment-search">Search engineer</label>
+    <input class="form-control mb-2" id="assignment-search" type="search" placeholder="Search by name or email" aria-controls="assignment-engineers">
+    <fieldset class="mb-3">
+      <legend class="form-label">Engineer</legend>
+      <div class="assignment-engineers" id="assignment-engineers">
+        {% for employee in employees %}
+        <label class="assignment-engineer" data-engineer>
+          <input class="form-check-input" type="radio" name="employee_id" value="{{ employee.id }}" {% if selected_employee and employee.id == selected_employee.id %}checked{% endif %} required>
+          <span><strong>{{ employee.name }}</strong><span class="d-block text-secondary">{{ employee.email }}</span></span>
+        </label>
+        {% else %}<p class="text-secondary p-3 mb-0">No active engineers available.</p>{% endfor %}
+      </div>
+      <p class="small text-secondary mt-2 mb-0" id="assignment-no-matches" role="status" hidden>No engineers match your search.</p>
+    </fieldset>
     <button class="btn btn-outline-primary">Load assignments</button>
   </form>
   {% if selected_employee %}
@@ -27,4 +36,7 @@
   </form>
   {% endif %}
 </section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/assignments.js') }}"></script>
 {% endblock %}

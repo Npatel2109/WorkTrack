@@ -22,6 +22,16 @@ The script compiles resources/Java/DEX, aligns the APK, signs it, verifies its
 signature and publishes `instance/downloads/worktrack.apk` for Flask to serve.
 Build intermediates and signing keys are not committed.
 
+To also update the distributable included in this repository:
+
+```powershell
+.\android\build.ps1 -PublishToRepository
+```
+
+This writes `android/downloads/worktrack.apk`, which is downloaded to EC2 by
+`git pull`. The included version 1.2.0 (versionCode 4) is development-signed for
+testing, not a production release. Never commit signing keys.
+
 By default this creates a **development-signed APK for testing**, with a local
 development keystore under `%LOCALAPPDATA%\WorkTrackAndroid\keys`. Before real
 distribution, use a private release keystore and secure password environment
@@ -38,7 +48,7 @@ from a development key to a release key requires uninstalling the development ap
 
 ## Fixed server
 
-The app always opens `AppConfig.SERVER` (`http://worktrack.blackpurple.in`), defined in
+The app always opens `AppConfig.SERVER` (`https://worktrack.blackpurple.in`), defined in
 `src/com/worktrack/mobile/AppConfig.java`. There is no setup screen or server switch;
 all screens and data come from that server, so web updates appear without reinstalling.
 If the server cannot be reached (no internet, DNS/connection failure or a 502-504 proxy
@@ -51,7 +61,10 @@ To change the address (for example to HTTPS), edit `AppConfig.SERVER` and
 ## Publish and install
 
 1. Apply Flask migrations on the server: `python -m flask --app wsgi db upgrade`.
-2. Copy the signed APK to `instance/downloads/worktrack.apk` on the server.
+2. Pull the repository to get the bundled `android/downloads/worktrack.apk`.
+   A private `instance/downloads/worktrack.apk` takes priority if it exists:
+   replace an old private APK with the new build or move it to a backup name.
+   Alternatively publish your own signed APK at that private path.
 3. Admin **Settings**: tick **Show "Download Android app" on the login page** and save.
    No download button appears if the switch is off or the APK is missing.
 4. Users download on the login page and permit APK installation from their browser.
@@ -66,6 +79,10 @@ permission. Open completed files from Android's download notification/Downloads;
 these files are removed when the app is uninstalled. Blob/data downloads are not
 supported.
 
+PDF upload/replacement uses Android's document picker restricted to PDF files.
+Cancelling returns to the form without changing its file. The server validates
+the PDF contents and size. No general device storage permission is requested.
+
 ## Device acceptance checks
 
 Build/signature verification is not a substitute for physical-device testing.
@@ -79,3 +96,7 @@ Before distributing to employees, test Android 8+ and a recent Android device:
 - Dashboard updates, address maps and external Google Maps navigation.
 - Full/half-day leave, approval, totals/date ranges and employee-only visibility.
 - Report/invoice PDF, merged PDF and Excel downloads/notifications/opening.
+- Submitted reports: select/cancel a PDF, submit it, edit dates/man-days, replace
+  the PDF and download both current and previous versions as owner/admin.
+- Engineer assignment search, long names/emails wrapping, and scrolling on a
+  small screen; sign out with an active visit and resume after signing back in.

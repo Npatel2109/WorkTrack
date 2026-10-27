@@ -1,7 +1,8 @@
 param(
     [string]$SdkRoot = "$env:LOCALAPPDATA\WorkTrackAndroid\sdk",
     [string]$KeyStore = "",
-    [string]$KeyAlias = "androiddebugkey"
+    [string]$KeyAlias = "androiddebugkey",
+    [switch]$PublishToRepository
 )
 $ErrorActionPreference = "Stop"
 $project = $PSScriptRoot
@@ -58,5 +59,11 @@ New-Item -ItemType Directory -Path $publish -Force | Out-Null
 $temporary = Join-Path $publish "worktrack.apk.tmp"
 Copy-Item -LiteralPath $signed -Destination $temporary -Force
 Move-Item -LiteralPath $temporary -Destination (Join-Path $publish "worktrack.apk") -Force
+if ($PublishToRepository) {
+    $distribution = Join-Path $project "downloads"
+    New-Item -ItemType Directory -Path $distribution -Force | Out-Null
+    Copy-Item -LiteralPath $signed -Destination (Join-Path $distribution "worktrack.apk") -Force
+    Write-Output "Verified APK also published to $distribution\worktrack.apk"
+}
 Remove-Item -LiteralPath $build -Recurse -Force
 Write-Output "Verified APK published to $publish\worktrack.apk"

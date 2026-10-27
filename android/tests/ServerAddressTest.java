@@ -3,6 +3,7 @@ package com.worktrack.mobile;
 public class ServerAddressTest {
     public static void main(String[] args) {
         String server = AppConfig.SERVER;
+        if (!"https://worktrack.blackpurple.in".equals(server)) throw new AssertionError("HTTPS production server");
         if (!server.matches("https?://[a-z0-9.-]+(:[0-9]+)?")) throw new AssertionError("Fixed server must be an origin: " + server);
         for (String value : new String[]{server, server + "/login", server + "/admin/settings?x=1"}) {
             if (!ServerAddress.sameOrigin(server, value)) throw new AssertionError(value);

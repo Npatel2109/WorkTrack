@@ -44,8 +44,9 @@ def create_app(test_config=None):
             "PUBLIC_BASE_URL", "http://127.0.0.1:5000"
         ),
         ANDROID_APK_PATH=str(Path(app.instance_path) / "downloads" / "worktrack.apk"),
+        ANDROID_BUNDLED_APK_PATH=str(Path(app.root_path).parent / "android" / "downloads" / "worktrack.apk"),
         # Must match AppConfig.SERVER in the Android app.
-        ANDROID_SERVER_URL="http://worktrack.blackpurple.in",
+        ANDROID_SERVER_URL="https://worktrack.blackpurple.in",
     )
     if app.config["SQLALCHEMY_DATABASE_URI"].startswith("postgres://"):
         app.config["SQLALCHEMY_DATABASE_URI"] = app.config[

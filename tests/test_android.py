@@ -16,6 +16,7 @@ class SettingsTestCase(unittest.TestCase):
             "TESTING": True, "SECRET_KEY": "android-test-key",
             "SQLALCHEMY_DATABASE_URI": "sqlite://",
             "UPLOAD_FOLDER": self.folder.name, "ANDROID_APK_PATH": str(self.apk),
+            "ANDROID_BUNDLED_APK_PATH": str(Path(self.folder.name) / "bundled.apk"),
             "WTF_CSRF_ENABLED": False,
         })
         self.context = self.app.app_context()
@@ -41,6 +42,29 @@ class SettingsTestCase(unittest.TestCase):
 
 
 class AndroidDownloadTests(SettingsTestCase):
+    def test_bundled_apk_download_and_private_override_keep_admin_switch(self):
+        bundled = Path(self.app.config["ANDROID_BUNDLED_APK_PATH"])
+        bundled.write_bytes(b"bundled apk fixture")
+        self.assertEqual(self.client.get("/download/android").status_code, 404)
+        self.login(self.admin)
+        self.assertIn(b"APK: Ready", self.client.get("/admin/settings").data)
+        self.client.post("/admin/settings", data={
+            "section": "android", "android_download_enabled": "yes",
+        })
+        self.client.post("/logout")
+        self.assertIn(b"Download Android app", self.client.get("/login").data)
+        response = self.client.get("/download/android")
+        self.assertEqual(response.data, b"bundled apk fixture")
+        response.close()
+        self.apk.write_bytes(b"private override fixture")
+        response = self.client.get("/download/android")
+        self.assertEqual(response.data, b"private override fixture")
+        response.close()
+        self.login(self.admin)
+        self.client.post("/admin/settings", data={"section": "android"})
+        self.assertEqual(self.client.get("/download/android").status_code, 404)
+        self.assertNotIn(b"Download Android app", self.client.get("/login").data)
+
     def test_download_requires_both_setting_and_published_file(self):
         self.assertNotIn(b"Download Android app", self.client.get("/login").data)
         self.assertEqual(self.client.get("/download/android").status_code, 404)
@@ -56,7 +80,7 @@ class AndroidDownloadTests(SettingsTestCase):
         self.client.post("/logout")
         login_page = self.client.get("/login").data
         self.assertIn(b"Download Android app", login_page)
-        self.assertIn(b"http://worktrack.blackpurple.in", login_page)
+        self.assertIn(b"https://worktrack.blackpurple.in", login_page)
         self.assertNotIn(b"enter this server address", login_page)
         response = self.client.get("/download/android")
         self.assertEqual(response.status_code, 200)
@@ -82,7 +106,7 @@ class AndroidDownloadTests(SettingsTestCase):
         self.login(self.admin)
         page = self.client.get("/admin/settings")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"http://worktrack.blackpurple.in", page.data)
+        self.assertIn(b"https://worktrack.blackpurple.in", page.data)
         self.assertEqual(self.client.post("/admin/settings", data={"section": "bad"}).status_code, 400)
         self.app.config["WTF_CSRF_ENABLED"] = True
         self.assertEqual(self.client.post("/admin/settings", data={}).status_code, 400)

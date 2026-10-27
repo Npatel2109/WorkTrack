@@ -22,6 +22,7 @@ import android.webkit.GeolocationPermissions;
 import android.webkit.PermissionRequest;
 import android.webkit.SslErrorHandler;
 import android.webkit.URLUtil;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -39,6 +40,7 @@ import java.io.ByteArrayInputStream;
 public class MainActivity extends Activity {
     private static final int CAMERA_REQUEST = 10;
     private static final int LOCATION_REQUEST = 11;
+    private static final int FILE_REQUEST = 12;
     private final String server = AppConfig.SERVER;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable retry = this::retryConnection;
@@ -51,6 +53,7 @@ public class MainActivity extends Activity {
     private String locationOrigin;
     private String lastUrl;
     private boolean pageFailed;
+    private ValueCallback<Uri[]> fileCallback;
 
     @Override
     public void onCreate(Bundle state) {
@@ -184,6 +187,26 @@ public class MainActivity extends Activity {
         });
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+                    FileChooserParams params) {
+                if (!sameOrigin(view.getUrl())) return false;
+                if (fileCallback != null) fileCallback.onReceiveValue(null);
+                fileCallback = callback;
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("application/pdf");
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                try {
+                    startActivityForResult(intent, FILE_REQUEST);
+                } catch (ActivityNotFoundException error) {
+                    fileCallback.onReceiveValue(null);
+                    fileCallback = null;
+                    Toast.makeText(MainActivity.this, "Install or enable a document picker to select your PDF report.", Toast.LENGTH_LONG).show();
+                }
+                return true;
+            }
+
+            @Override
             public void onPermissionRequest(PermissionRequest request) {
                 runOnUiThread(() -> {
                     boolean cameraOnly = request.getResources().length == 1
@@ -313,6 +336,21 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == FILE_REQUEST && fileCallback != null) {
+            Uri uri = resultCode == RESULT_OK && data != null ? data.getData() : null;
+            boolean allowed = uri != null && "content".equals(uri.getScheme())
+                && sameOrigin(webView.getUrl());
+            fileCallback.onReceiveValue(allowed ? new Uri[]{uri} : null);
+            fileCallback = null;
+            if (uri != null && !allowed) {
+                Toast.makeText(this, "Choose a PDF using the Android document picker.", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    @Override
     public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
         if (code == CAMERA_REQUEST && cameraRequest != null) {
@@ -358,6 +396,10 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(retry);
         if (cameraRequest != null) cameraRequest.deny();
         if (locationCallback != null) locationCallback.invoke(locationOrigin, false, false);
+        if (fileCallback != null) {
+            fileCallback.onReceiveValue(null);
+            fileCallback = null;
+        }
         if (webView != null) webView.destroy();
         super.onDestroy();
     }

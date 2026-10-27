@@ -70,6 +70,14 @@ a:hover { color: #214dc7; }
 .form-control, .form-select { border-color: #dfe5ed; min-height: 42px; color: var(--ink); }
 .form-control:focus, .form-select:focus { border-color: #8da7ff; box-shadow: 0 0 0 .2rem #3868ee18; }
 .form-label { font-size: .83rem; font-weight: 650; }
+.assignment-engineers { max-height: 18rem; overflow-y: auto; border: 1px solid var(--border); border-radius: .5rem; }
+.assignment-engineer { display: flex; align-items: flex-start; gap: .75rem; padding: .8rem; cursor: pointer; border-bottom: 1px solid var(--border); }
+.assignment-engineer:last-child { border-bottom: 0; }
+.assignment-engineer[hidden] { display: none; }
+.assignment-engineer > span { min-width: 0; overflow-wrap: anywhere; }
+.assignment-engineer .form-check-input { flex-shrink: 0; }
+.assignment-engineer:has(input:checked) { background: var(--background); }
+.assignment-engineer:focus-within { outline: 2px solid var(--blue); outline-offset: -2px; }
 .btn { font-weight: 650; }
 .btn-primary { background: var(--blue); border-color: var(--blue); }
 .btn-primary:hover { background: #2855d2; border-color: #2855d2; }

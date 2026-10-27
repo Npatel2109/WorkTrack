@@ -925,6 +925,19 @@ class WorkflowTests(unittest.TestCase):
         self._login_admin()
         self.assertEqual(self.client.get("/admin/sites/999/edit").status_code, 404)
 
+    def test_assignment_engineers_render_as_wrapping_searchable_radio_list(self):
+        self._login_admin()
+        page = self.client.get("/admin/assignments", query_string={"employee_id": self.employee.id})
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'id="assignment-search"', page.data)
+        self.assertIn(b'class="assignment-engineers"', page.data)
+        self.assertIn(b'type="radio" name="employee_id"', page.data)
+        self.assertIn(b"engineer@example.com", page.data)
+        self.assertIn(b"assignments.js", page.data)
+        self.assertIn(b"Load assignments", page.data)
+        self.assertIn(b"Save assignments", page.data)
+        self.assertNotIn(b'id="assignment-engineer"', page.data)
+
     def test_shared_catalog_site_can_be_assigned_to_multiple_engineers_without_copying(self):
         self._login_admin()
         other = User(name="Other", email="other@example.com", mobile="3")

@@ -284,7 +284,7 @@ def login():
     return render_template(
         "login.html", android_server_url=current_app.config["ANDROID_SERVER_URL"],
         android_available=bool(settings and settings.android_download_enabled)
-        and Path(current_app.config["ANDROID_APK_PATH"]).is_file(),
+        and _android_apk_path().is_file(),
     )
 
 
@@ -395,7 +395,7 @@ def app_settings():
     return render_template(
         "settings.html", settings=settings,
         android_server_url=current_app.config["ANDROID_SERVER_URL"],
-        apk_ready=Path(current_app.config["ANDROID_APK_PATH"]).is_file(),
+        apk_ready=_android_apk_path().is_file(),
         env_mail_server=current_app.config["MAIL_SERVER"],
         env_public_url=current_app.config["PUBLIC_BASE_URL"],
     )
@@ -404,7 +404,7 @@ def app_settings():
 @bp.route("/download/android")
 def download_android():
     settings = db.session.get(AppSettings, 1)
-    path = Path(current_app.config["ANDROID_APK_PATH"])
+    path = _android_apk_path()
     if not settings or not settings.android_download_enabled or not path.is_file():
         abort(404)
     response = send_file(
@@ -414,6 +414,13 @@ def download_android():
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+def _android_apk_path():
+    private_path = Path(current_app.config["ANDROID_APK_PATH"])
+    if private_path.is_file():
+        return private_path
+    return Path(current_app.config["ANDROID_BUNDLED_APK_PATH"])
 
 
 @bp.route("/forgot-password", methods=["GET", "POST"])

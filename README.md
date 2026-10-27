@@ -79,6 +79,7 @@ For password reset emails, an administrator can open **Settings ? Email (passwor
 - Site assignment with WGS84 coordinates and configurable geofence radius (10–5,000 m; default 100 m)
 - **Sites** is a reusable catalog: create each site once without selecting an employee. **Edit site** changes its shared customer/address, map coordinates, radius and report-header details. Edits are blocked while any engineer has an active visit at that site. Historical attendance coordinate/distance snapshots remain unchanged; displayed site names/header details use the updated catalog entry.
 - **Assign sites** is a separate tab: select an active engineer, click **Load assignments**, tick any number of catalog sites and **Save assignments**. The same site can be assigned to multiple engineers without copying its details. Saving again does not duplicate memberships. Unticking removes future start access but preserves earlier visits, reports and membership history; an active visit must be stopped before its site can be unticked.
+- The engineer picker is a scrollable radio list with name/email search and wrapping text, avoiding clipped native dropdown options on desktop and Android.
 - Completed report review, PDF download, Excel export, selfie viewing, attendance history, and account access audit log
 - **Submitted reports**: read-only access to all employee-uploaded reports, their dates/manual man-days, complete change history, and downloads of current and previous PDF versions
 - Clickable dashboard totals that open their matching employee/site/visit/report lists
@@ -374,20 +375,25 @@ Password-reset links use the public app address from Settings (or
 The embedded Android client is a thin WebView shell around this web app, so screens,
 features, roles and data always come from the server; updating the server updates
 the app without reinstalling. Its server address is fixed at build time to
-`http://worktrack.blackpurple.in` (`AppConfig.SERVER` in the Android sources, mirrored
+`https://worktrack.blackpurple.in` (`AppConfig.SERVER` in the Android sources, mirrored
 by `ANDROID_SERVER_URL` in `geosite/__init__.py`). Users never enter an address. When
 the server is reachable the app shows live data; otherwise it shows `-` and retries
 automatically every 15 seconds (or on **Reload**/**Retry**).
 
-See [Android build and installation instructions](android/README.md). After building
-and copying the signed APK to `instance/downloads/worktrack.apk` on the server, an
-administrator enables **Show "Download Android app" on the login page** in **Settings**.
+See [Android build and installation instructions](android/README.md). Version 1.2.0
+(versionCode 4) is bundled at `android/downloads/worktrack.apk`, so `git pull`
+also obtains the APK. An administrator must still enable **Show "Download Android
+app" on the login page** in **Settings**. A private
+`instance/downloads/worktrack.apk` takes priority if present; replace an old private
+copy with the new APK or move it to a backup name to use the bundled build.
 
-The fixed address uses HTTP, so passwords and data are unencrypted and Android
-blocks camera/GPS site visits until the domain is served over HTTPS. To switch to
-HTTPS, change `AppConfig.SERVER` and `ANDROID_SERVER_URL`, increase `versionCode`, rebuild
-and redistribute the APK. The default local build is development-signed; use a private
-release signing key for production. No Play Store account is required for sideloading.
+The app opens the HTTPS login page without server setup and removes old saved
+server addresses. The Android document picker supports uploading and replacing
+PDFs in **Submitted reports**, without broad storage permission. Sign-out, Excel
+day counts and version-history screens come from the updated server. The bundled
+APK is development-signed for testing; use a private release signing key for
+production. Android updates need the same signing key; if an older installation
+uses a different key it must be uninstalled first. No Play Store account is required.
 
 ## Production serving
 

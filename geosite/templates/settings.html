@@ -48,6 +48,7 @@
     <p>The Android app always connects to <strong class="text-break">{{ android_server_url }}</strong>. Users do not enter any address; the app shows live data when the server is reachable and "-" when it is not.</p>
     <label class="d-block mb-3"><input type="checkbox" name="android_download_enabled" value="yes" {% if settings and settings.android_download_enabled %}checked{% endif %}> Show "Download Android app" on the login page</label>
     <p class="small text-secondary">APK: {{ "Ready" if apk_ready else "Not built or published yet. The download stays hidden until an APK is available." }}</p>
+    <p class="small text-secondary">A bundled APK is included with the repository. A private instance/downloads/worktrack.apk, if present, takes priority; replace or remove an old private APK to serve the new bundled build. The bundled build is development-signed for testing.</p>
     {% if android_server_url.startswith('http:') %}<div class="alert alert-warning">This address uses HTTP. Passwords and data are unencrypted, and phones block camera/GPS for site visits until the domain uses HTTPS.</div>{% endif %}
     <button class="btn btn-primary">Save settings</button>
   </form>
