@@ -115,6 +115,18 @@ class AssignedSite(db.Model):
     attendance_records = db.relationship("Attendance", back_populates="site")
 
 
+class LeaveAllowanceAccount(db.Model):
+    employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), primary_key=True)
+    joining_date = db.Column(db.Date, nullable=False)
+    opening_days = db.Column(db.Numeric(8, 1), nullable=False, default=0)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __table_args__ = (
+        db.CheckConstraint("opening_days >= 0", name="leave_opening_nonnegative"),
+    )
+
+
 class MonthlyLeaveEntitlement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)

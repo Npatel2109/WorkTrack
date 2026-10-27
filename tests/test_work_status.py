@@ -12,7 +12,7 @@ from sqlalchemy import inspect
 from geosite import create_app
 from geosite.attendance import daily_cutoff
 from geosite.extensions import db
-from geosite.models import Attendance, AttendancePolicy, AssignedSite, AuditLog, DailyWorkStatus, LeaveRequest, MonthlyLeaveEntitlement, SiteAssignment, User
+from geosite.models import Attendance, AttendancePolicy, AssignedSite, AuditLog, DailyWorkStatus, LeaveAllowanceAccount, LeaveRequest, MonthlyLeaveEntitlement, SiteAssignment, User
 from geosite.timeutils import INDIA_TIME
 from geosite.work_status import attendance_summary, month_bounds, monthly_leave_balance
 
@@ -405,15 +405,16 @@ class WorkStatusTests(unittest.TestCase):
         month = date(2026, 10, 1)
         self.leave(date(2026, 10, 31))
         balance = monthly_leave_balance(self.employee, month, now=self.now)
-        self.assertIsNone(balance["entitlement"])
-        self.assertIsNone(balance["remaining"])
-        self.assertEqual(balance["used"], 2)  # Approved future day plus Monday automatic leave.
+        self.assertEqual(balance["entitlement"], 2)
+        self.assertEqual(balance["remaining"], 1)
+        self.assertEqual(balance["used"], 1)  # Monday automatic leave; future approved day is reserved.
+        self.assertEqual(balance["reserved"], 1)
         self.login(self.admin)
         values = {"employee_id": self.employee.id, "month": "2026-10", "days": "0.5"}
-        self.assertIn(b"Monthly leave entitlement saved", self.client.post(
+        self.assertIn(b"Monthly leave rate saved", self.client.post(
             "/admin/leaves/entitlement", data=values, follow_redirects=True).data)
         balance = monthly_leave_balance(self.employee, month, now=self.now)
-        self.assertEqual(balance["remaining"], -1.5)
+        self.assertEqual(balance["remaining"], -0.5)
         for invalid in ("NaN", "Infinity", "-1", "31.5", "1.25", "bad", ""):
             self.assertIn(b"Invalid monthly entitlement", self.client.post(
                 "/admin/leaves/entitlement", data={**values, "days": invalid}, follow_redirects=True).data)
@@ -423,8 +424,8 @@ class WorkStatusTests(unittest.TestCase):
         self.client.post("/admin/leaves/entitlement", data={**values, "days": "0"})
         self.assertEqual(MonthlyLeaveEntitlement.query.count(), 1)
         self.assertEqual(float(MonthlyLeaveEntitlement.query.one().days), 0)
-        self.assertEqual(monthly_leave_balance(self.employee, date(2026, 11, 1), now=self.now)["used"], 0)
-        self.assertIsNone(monthly_leave_balance(self.employee, date(2026, 11, 1), now=self.now)["entitlement"])
+        self.assertEqual(monthly_leave_balance(self.employee, date(2026, 11, 1), now=self.now)["used"], 1)
+        self.assertEqual(monthly_leave_balance(self.employee, date(2026, 11, 1), now=self.now)["entitlement"], 0)
         self.assertEqual(self.client.get("/admin/leaves?leave_month=bad").status_code, 400)
         self.login(self.employee)
         self.assertIn(b'id="monthly-entitlement">0 days', self.client.get("/employee").data)
@@ -461,6 +462,118 @@ class WorkStatusTests(unittest.TestCase):
         self.assertIn(b"already been submitted", self.submit().data)
         self.assertEqual(DailyWorkStatus.query.count(), 1)
 
+    def test_two_days_from_joining_month_and_unlimited_year_carryforward(self):
+        db.session.delete(db.session.get(AttendancePolicy, 1))
+        self.employee.created_date = datetime(2026, 1, 21, 20, tzinfo=timezone.utc)
+        db.session.commit()
+        for day, expected in ((date(2026, 1, 22), 2), (date(2026, 2, 1), 4),
+                              (date(2026, 12, 31), 24), (date(2027, 1, 1), 26)):
+            now = datetime.combine(day, datetime.min.time(), tzinfo=INDIA_TIME)
+            balance = monthly_leave_balance(self.employee, day, now=now)
+            self.assertEqual(balance["entitlement"], expected)
+            self.assertEqual(balance["remaining"], expected)
+            self.assertEqual(balance["used"], 0)
+        self.assertEqual(balance["history"][-1]["credit"], 2)
+        self.assertEqual(balance["history"][-2]["remaining"], 24)
+        # Future months do not credit ahead of time; months before joining show zero.
+        self.assertEqual(monthly_leave_balance(self.employee, date(2028, 1, 1), now=now)["entitlement"], 26)
+        self.assertEqual(monthly_leave_balance(self.employee, date(2025, 12, 1), now=now)["entitlement"], 0)
+        before_joining = datetime(2026, 1, 21, 19, tzinfo=timezone.utc)  # Joining date is Jan 22 IST.
+        self.assertEqual(monthly_leave_balance(self.employee, date(2026, 1, 1),
+                                              now=before_joining)["entitlement"], 2)
+        before_joining = datetime(2026, 1, 21, 18, tzinfo=timezone.utc)
+        self.assertEqual(monthly_leave_balance(self.employee, date(2026, 1, 1),
+                                              now=before_joining)["entitlement"], 0)
+
+    def test_opening_balance_rate_changes_and_historical_credits(self):
+        db.session.delete(db.session.get(AttendancePolicy, 1))
+        db.session.commit()
+        self.login(self.admin)
+        response = self.client.post("/admin/leaves/account", data={
+            "employee_id": self.employee.id, "joining_date": "2026-01-15", "opening_days": "3.5",
+        }, follow_redirects=True)
+        self.assertIn(b"Joining date and opening leave balance saved", response.data)
+        self.client.post("/admin/leaves/entitlement", data={
+            "employee_id": self.employee.id, "month": "2026-03", "days": "3",
+        })
+        self.client.post("/admin/leaves/entitlement", data={
+            "employee_id": self.employee.id, "month": "2026-06", "days": "1.5",
+        })
+        balance = monthly_leave_balance(self.employee, date(2026, 10, 1), now=self.now)
+        self.assertEqual(balance["entitlement"], 3.5 + 2 * 2 + 3 * 3 + 5 * 1.5)
+        self.assertEqual(balance["history"][0]["credit"], 2)
+        self.assertEqual(balance["history"][1]["remaining"], 7.5)
+        self.assertEqual(balance["history"][2]["credit"], 3)
+        self.assertEqual(balance["monthly_rate"], 1.5)
+        self.assertEqual(monthly_leave_balance(self.employee, date(2026, 2, 1), now=self.now)["remaining"], 7.5)
+        self.assertEqual(MonthlyLeaveEntitlement.query.count(), 2)
+        self.assertIsNotNone(AuditLog.query.filter_by(action="leave_account_updated").first())
+        response = self.client.post("/admin/leaves/account", data={
+            "employee_id": self.employee.id, "joining_date": "2026-04-01", "opening_days": "3.5",
+        }, follow_redirects=True)
+        self.assertIn(b"cannot exclude an existing monthly rate change", response.data)
+        self.assertEqual(db.session.get(LeaveAllowanceAccount, self.employee.id).joining_date, date(2026, 1, 15))
+        self.assertIn(b"Opening balance: 3.5", self.client.get("/admin/leaves?employee_id=1").data)
+        self.login(self.employee)
+        page = self.client.get("/employee/leaves?employee_id=" + str(self.other.id))
+        self.assertIn(b"Jan 2026", page.data)
+        self.assertNotIn(self.other.email.encode(), page.data)
+        self.assertNotIn(b"Save rate", page.data)
+        self.assertNotIn(b"Save joining / opening balance", page.data)
+        self.assertEqual(self.client.post("/admin/leaves/account", data={}).status_code, 403)
+
+    def test_account_validation_csrf_and_no_duplicate_opening_credit(self):
+        self.login(self.admin)
+        values = {"employee_id": self.employee.id, "joining_date": "2026-10-01", "opening_days": "4"}
+        for invalid in ("NaN", "Infinity", "-1", "1.25", "1000000", ""):
+            response = self.client.post("/admin/leaves/account", data={**values, "opening_days": invalid},
+                                        follow_redirects=True)
+            self.assertIn(b"Invalid leave account", response.data)
+        for invalid in ("bad", "", "2026-10-28"):
+            self.assertIn(b"Invalid leave account", self.client.post(
+                "/admin/leaves/account", data={**values, "joining_date": invalid},
+                follow_redirects=True).data)
+        self.assertEqual(LeaveAllowanceAccount.query.count(), 0)
+        for _ in range(2):
+            self.client.post("/admin/leaves/account", data=values)
+        self.assertEqual(LeaveAllowanceAccount.query.count(), 1)
+        balance = monthly_leave_balance(self.employee, self.now.date(), now=self.now)
+        self.assertEqual(balance["entitlement"], 6)
+        self.client.post("/admin/leaves/entitlement", data={
+            "employee_id": self.employee.id, "month": "2026-10", "days": "2",
+        })
+        self.assertIn(b"Invalid leave account", self.client.post("/admin/leaves/account", data={
+            **values, "joining_date": "2026-10-28",
+        }, follow_redirects=True).data)
+        self.assertIn(b"before the employee", self.client.post("/admin/leaves/entitlement", data={
+            "employee_id": self.employee.id, "month": "2026-09", "days": "2",
+        }, follow_redirects=True).data)
+        self.app.config["WTF_CSRF_ENABLED"] = True
+        self.assertEqual(self.client.post("/admin/leaves/account", data=values).status_code, 400)
+
+    def test_cumulative_approved_absence_half_days_and_future_reservations(self):
+        self.employee.created_date = datetime(2026, 9, 15, tzinfo=timezone.utc)
+        db.session.commit()
+        self.leave(date(2026, 9, 30))
+        self.leave(date(2026, 10, 26), period="morning")
+        self.leave(date(2026, 10, 28), period="afternoon")
+        self.leave(date(2026, 10, 29), status="pending")
+        self.leave(date(2026, 10, 30), status="rejected")
+        balance = monthly_leave_balance(self.employee, date(2026, 10, 1), now=self.now)
+        self.assertEqual(balance["entitlement"], 4)
+        self.assertEqual(balance["used"], 2)  # September 1 + October half approved + half absence.
+        self.assertEqual(balance["remaining"], 2)
+        self.assertEqual(balance["reserved"], 0.5)
+        self.assertEqual(balance["available"], 1.5)
+        self.assertEqual(balance["history"][0]["approved"], 1)
+        self.assertEqual(balance["history"][1]["automatic"], 0.5)
+        self.assertEqual(sum(row["approved"] + row["automatic"] for row in balance["history"]), balance["used"])
+        self.now = datetime(2026, 10, 28, 10, tzinfo=timezone.utc)
+        balance = monthly_leave_balance(self.employee, date(2026, 10, 1), now=self.now)
+        self.assertEqual(balance["used"], 3.5)  # Tuesday absent; Wednesday approved half.
+        self.assertEqual(balance["reserved"], 0)
+        self.assertEqual(balance["remaining"], 0.5)
+
 
 class WorkStatusMigrationTests(unittest.TestCase):
     def test_upgrade_policy_activation_and_reversible_schema(self):
@@ -482,14 +595,35 @@ class WorkStatusMigrationTests(unittest.TestCase):
                                      datetime.now(INDIA_TIME).date())
                     self.assertEqual(DailyWorkStatus.query.count(), 0)
                     self.assertIn("monthly_leave_entitlement", inspect(db.engine).get_table_names())
+                    self.assertIn("leave_allowance_account", inspect(db.engine).get_table_names())
                     self.assertEqual(MonthlyLeaveEntitlement.query.count(), 0)
                     self.assertIn("site_radius_m", {
                         column["name"] for column in inspect(db.engine).get_columns("attendance")
                     })
+                    user = User.query.one()
+                    user.created_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
+                    db.session.add(MonthlyLeaveEntitlement(
+                        employee_id=user.id, month=date(2026, 2, 1), days=3,
+                        updated_by_id=user.id,
+                    ))
+                    db.session.commit()
+                    db.session.remove()
+                    downgrade(directory=migrations, revision="06ab1c2d3e49")
+                    self.assertNotIn("leave_allowance_account", inspect(db.engine).get_table_names())
+                    self.assertEqual(float(MonthlyLeaveEntitlement.query.one().days), 3)
+                    db.session.remove()
+                    upgrade(directory=migrations)
+                    self.assertEqual(LeaveAllowanceAccount.query.count(), 0)
+                    balance = monthly_leave_balance(
+                        User.query.one(), date(2026, 3, 1),
+                        now=datetime(2026, 3, 15, tzinfo=timezone.utc),
+                    )
+                    self.assertEqual(balance["entitlement"], 8)  # January 2, February/March 3 each.
                     db.session.remove()
                     downgrade(directory=migrations, revision="e48f9a0b1c27")
                     self.assertNotIn("daily_work_status", inspect(db.engine).get_table_names())
                     self.assertNotIn("monthly_leave_entitlement", inspect(db.engine).get_table_names())
+                    self.assertNotIn("leave_allowance_account", inspect(db.engine).get_table_names())
                     self.assertEqual(User.query.one().name, "Old")
                     upgrade(directory=migrations)
                     self.assertEqual(DailyWorkStatus.query.count(), 0)

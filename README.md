@@ -387,16 +387,41 @@ per-employee totals (including inactive employees' history). Employee searches
 use literal text, not wildcard patterns. Employees can only view their own
 requests and totals, regardless of employee filters supplied in a URL.
 
-The **Monthly leave entitlement & balance** section lets admins set each
-employee's allowance for a selected India-calendar month, from 0 to 31 days in
-0.5-day increments. This is separate from actual dated leave records. Both roles
-see entitlement, approved + automatic days, and remaining balance; the employee
-dashboard shows the current month. An unset allowance is **Not set**, not zero.
-Remaining = entitlement minus all approved dates in that month (including future
-approved dates) minus automatic leave through the current cutoff. Pending/rejected
-requests do not reserve days. Negative balances are allowed and there is no
-automatic carry-forward. These web changes also appear in Android 1.3.0 without
-reinstalling the app. Apply migration `06ab1c2d3e49` before restarting the server.
+The **Leave allowance & carry-forward balance** section automatically credits
+**2 days in the joining month**, then 2 days on the first of every following
+India-calendar month. There is no joining-month proration. The joining date
+defaults to the employee's account-creation date; admins can correct it to the
+actual joining date and enter an optional opening unused-leave balance. Opening
+days are credited once, in addition to monthly accrual; do not enter unused days
+already covered by that accrual.
+
+Admins can set a different monthly rate (0 to 31 days in 0.5-day increments)
+effective from a selected month. The rate continues until the next rate change;
+credits before that effective month are unchanged. Existing monthly entitlement
+entries are retained and now act as effective-from rate changes, not isolated
+one-month allowances. Joining/opening/rate changes are audited.
+
+Both roles see **total leaves assigned**, **total leaves taken + absence** and
+**remaining leaves**, plus month-by-month credit/deduction/closing-balance history
+and rate changes. The dashboard shows cumulative totals through today; the leave
+page allows a historical month, capped at today so future credits are not awarded
+early. Unused days carry forward across every month and year, without expiry or
+a yearly reset. For example, a January joiner at 2 days/month with no deductions
+has 2 in January, 4 in February, 24 in December and **26 next January**.
+
+Remaining = opening balance + monthly credits since joining - approved leave
+through the reporting date - automatic absence through the daily cutoff. Future
+approved leave is separately **reserved**, with **available after reservations**
+also shown. Pending/rejected requests do not deduct days. Half-day deductions are
+0.5; approved and automatic leave are not double-counted. Negative balances remain
+visible; the allowance does not impose a new hard approval limit. Automatic
+absence still starts only from the attendance policy activation date, not from
+before the system tracked attendance.
+
+These are allowance credits, not actual dated leave records. Actual leave
+applications and their separate approval workflow remain available. These web
+changes also appear in Android 1.3.0 without reinstalling. Apply migration
+`17bc2d3e4f50` (`flask --app wsgi db upgrade`) before restarting the server.
 
 The admin dashboard includes clickable **Pending leave requests** and **On leave
 today** cards, refreshed with the existing 15-second live status update. The latter

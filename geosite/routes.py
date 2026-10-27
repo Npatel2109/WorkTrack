@@ -33,7 +33,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from .extensions import db
 from .attendance import daily_cutoff, stop_attendance
 from .timeutils import INDIA_TIME, format_ist, india_date
-from .models import AppSettings, AssignedSite, Attendance, AttendancePolicy, AuditLog, DailyWorkStatus, Invoice, LeaveRequest, MonthlyLeaveEntitlement, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
+from .models import AppSettings, AssignedSite, Attendance, AttendancePolicy, AuditLog, DailyWorkStatus, Invoice, LeaveAllowanceAccount, LeaveRequest, MonthlyLeaveEntitlement, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
 from .work_status import approved_leave_today, attendance_summary, leave_overlap, month_bounds, monthly_leave_balance
 from .services import (
     generate_invoice_pdf,
@@ -722,6 +722,7 @@ def delete_employee(user_id):
         or LeaveRequest.query.filter_by(employee_id=user_id).first()
         or DailyWorkStatus.query.filter_by(employee_id=user_id).first()
         or MonthlyLeaveEntitlement.query.filter_by(employee_id=user_id).first()
+        or db.session.get(LeaveAllowanceAccount, user_id)
         or SubmittedReport.query.filter_by(employee_id=user_id).first()
         or AuditLog.query.filter_by(user_id=user_id).first()
     )
@@ -1241,6 +1242,10 @@ def save_leave_entitlement():
         if employee.role != "employee":
             raise ValueError("Select a valid employee.")
         month = date.fromisoformat(request.form.get("month", "") + "-01")
+        account = db.session.get(LeaveAllowanceAccount, employee_id)
+        joining = account.joining_date if account else india_date(employee.created_date)
+        if month < joining.replace(day=1):
+            raise ValueError("The rate cannot begin before the employee's joining month.")
         days = Decimal(request.form.get("days", ""))
         if not days.is_finite() or not 0 <= days <= 31 or days * 2 != (days * 2).to_integral_value():
             raise ValueError("Entitlement must be 0 to 31 days in half-day increments.")
@@ -1256,8 +1261,44 @@ def save_leave_entitlement():
     write_audit(current_user, "leave_entitlement_updated",
                 f"Employee {employee_id}; {month:%Y-%m}; {old_days} -> {days} days")
     db.session.commit()
-    flash("Monthly leave entitlement saved.", "success")
-    return redirect(url_for("main.admin_leaves", leave_month=month.strftime("%Y-%m")))
+    flash("Monthly leave rate saved from the selected month onward. Earlier credits are preserved.", "success")
+    return redirect(url_for("main.admin_leaves", leave_month=month.strftime("%Y-%m"), employee_id=employee_id))
+
+
+@bp.route("/admin/leaves/account", methods=["POST"])
+@admin_required
+def save_leave_account():
+    try:
+        employee_id = int(request.form.get("employee_id", ""))
+        employee = _lock_employee(employee_id)
+        if employee.role != "employee":
+            raise ValueError("Select a valid employee.")
+        joining = date.fromisoformat(request.form.get("joining_date", ""))
+        if joining > india_date(utcnow()):
+            raise ValueError("Joining date cannot be in the future.")
+        opening = Decimal(request.form.get("opening_days", ""))
+        if not opening.is_finite() or not 0 <= opening <= 999999 or opening * 2 != (opening * 2).to_integral_value():
+            raise ValueError("Opening balance must be 0 to 999,999 days in half-day increments.")
+        earliest = MonthlyLeaveEntitlement.query.filter_by(employee_id=employee_id).order_by(
+            MonthlyLeaveEntitlement.month
+        ).first()
+        if earliest and earliest.month < joining.replace(day=1):
+            raise ValueError("Joining date cannot exclude an existing monthly rate change.")
+    except (ValueError, InvalidOperation) as error:
+        flash(f"Invalid leave account. {error}", "danger")
+        return redirect(url_for("main.admin_leaves"))
+    account = db.session.get(LeaveAllowanceAccount, employee_id)
+    previous = f"{account.joining_date}; {account.opening_days}" if account else "account creation date; 0"
+    if account is None:
+        account = LeaveAllowanceAccount(employee_id=employee_id)
+        db.session.add(account)
+    account.joining_date, account.opening_days = joining, opening
+    account.updated_by_id, account.updated_at = current_user.id, utcnow()
+    write_audit(current_user, "leave_account_updated",
+                f"Employee {employee_id}; before={previous}; after={joining}; opening={opening}")
+    db.session.commit()
+    flash("Joining date and opening leave balance saved. Leave totals have been recalculated.", "success")
+    return redirect(url_for("main.admin_leaves", employee_id=employee_id))
 
 
 @bp.route("/employee/leaves", methods=["GET", "POST"])

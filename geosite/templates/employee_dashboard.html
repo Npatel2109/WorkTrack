@@ -11,11 +11,11 @@
     {% endfor %}
   </div>
   <div class="row g-3 mb-3">
-    <div class="col-md-4"><span class="stat-label">Monthly entitlement</span><div class="fw-semibold" id="monthly-entitlement">{{ "%g days"|format(leave_balance.entitlement) if leave_balance.entitlement is not none else "Not set by admin" }}</div></div>
-    <div class="col-md-4"><span class="stat-label">Approved + automatic days</span><div class="fw-semibold">{{ "%g"|format(leave_balance.used) }}</div></div>
-    <div class="col-md-4"><span class="stat-label">Remaining balance</span><div class="fw-semibold" id="monthly-balance">{{ "%g days"|format(leave_balance.remaining) if leave_balance.remaining is not none else "Not set" }}</div></div>
+    <div class="col-md-4"><span class="stat-label">Total leaves assigned (including carry-forward)</span><div class="fw-semibold" id="monthly-entitlement">{{ "%g days"|format(leave_balance.entitlement) }}</div></div>
+    <div class="col-md-4"><span class="stat-label">Total leaves taken + absence</span><div class="fw-semibold" id="total-leaves-taken">{{ "%g days"|format(leave_balance.used) }}</div></div>
+    <div class="col-md-4"><span class="stat-label">Remaining leaves</span><div class="fw-semibold" id="monthly-balance">{{ "%g days"|format(leave_balance.remaining) }}</div></div>
   </div>
-  <p class="small text-secondary">Balance includes approved leave for the whole month (including future dates) plus automatic leave to date. Pending/rejected requests do not reserve entitlement. A negative balance means the entitlement is exceeded; there is no automatic carry-forward.</p>
+  <p class="small text-secondary">Current monthly credit: {{ "%g"|format(leave_balance.monthly_rate) }} days. Accrual starts in the joining month (joining date: {{ leave_balance.joining_date.strftime("%d %b %Y") }}). Unused leave carries forward every month and year without expiry. Approved leave through today and automatic absence reduce the balance. Future approved leave reserved: {{ "%g"|format(leave_balance.reserved) }} days; available after reservations: {{ "%g"|format(leave_balance.available) }} days. Pending/rejected requests do not reduce it. A negative balance means the allowance is exceeded. <a href="{{ url_for('main.employee_leaves') }}">View complete allowance history</a>.</p>
   <p class="small text-secondary">Approved + automatic leave: <strong id="monthly-leave-total">{{ "%g"|format(monthly_summary.total_leave) }} days</strong>. Request totals include only dates within this month. Automatic leave applies after 23:59 IST, Monday-Saturday, when no site visit or approved work confirmation exists; approved leave is not counted twice. Pending/rejected work confirmations do not prevent automatic leave.</p>
   {% for leave in monthly_summary.leaves %}
   <div class="d-flex flex-wrap justify-content-between gap-2 py-2 border-bottom">
