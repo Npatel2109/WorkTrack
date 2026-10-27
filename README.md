@@ -294,12 +294,24 @@ leave requests, plus automatic leave dates/days. Cross-month requests count only
 their dates in the current India-calendar month. Approved + automatic days are
 shown separately from pending/rejected request days.
 
+The employee dashboard has one **Today's Work Status** box with **On Site**,
+**WFH**, **Leave**, **Training** and **Travelling**. On Site reveals assigned
+sites; selecting one reveals **Start Site**, which continues through the existing
+GPS and live-selfie confirmation before activating attendance. WFH, Training and
+Travelling require a comment; Leave requires a reason and full/half-day duration.
+Approved full-day leave automatically displays **On leave** without a submission
+and blocks new site starts. One approved half day still permits site work; two
+opposite approved halves block starts just like a full day. Stop Site remains
+available for existing active visits.
+
 On a day without a recorded site visit, employees choose **WFH**, **Travelling**
 or **Training** and supply a reason before **23:59 IST**. Each employee may
 submit one confirmation for today, not for another employee or a past date.
 Admins review these under **Work confirmations**, including historical pending
 requests; employees see their decision on the dashboard. Work confirmation does
-not prevent starting a site later.
+not prevent starting a site later. Employees cannot replace their confirmation;
+admins can correct its type/comment. A real correction resets approval to pending
+and records before/after details in the audit log; an unchanged save preserves approval.
 
 At/after 23:59 IST on Monday-Saturday, an employee with no site start that day
 and no approved work confirmation is counted as automatic leave. Pending and
@@ -315,8 +327,7 @@ date (or the employee's creation date, if later), so it does not mark historical
 pre-upgrade days absent. This is a separate attendance summary, not a fabricated
 approved leave application. Automatic dates are also included in the existing
 employee/admin leave totals and as zero-billable-day rows in site activity Excel.
-Existing leave application/approval workflows and generated visit billing remain
-unchanged.
+Generated visit billing remains unchanged.
 
 Visit controls are now **Start Site** and **Stop Site** (including location and
 selfie confirmation screens).
@@ -349,18 +360,23 @@ development-signed for testing. See [Android instructions](android/README.md).
 Apply the latest migration (`flask --app wsgi db upgrade`) before starting the updated app.
 Employees can open **My leave** or the leave section on their dashboard to apply for
 full-day date ranges or a single morning/afternoon half day, with a required reason.
-Leave submission/review date validation uses UTC; full-day ranges include weekends. Past start
+Leave dates use IST; full-day ranges include weekends. Employee past start
 dates and overlapping pending/approved requests are rejected. Opposite half days
 on the same date are allowed.
 
-Administrators can approve or reject pending requests under **Leave**. Decisions
-are final and recorded in the audit log; employees can see their status and reviewer.
-Expired requests or requests from inactive employees cannot be approved. Employees
+Administrators can add dated leave records (including past dates), edit dates,
+full/half-day duration and reasons, and separately approve/reject pending requests
+under **Leave**. A changed record resets its decision/reviewer to pending; an
+unchanged save preserves the decision. Ownership cannot be changed. All changes
+and decisions are audited; employees see their status and reviewer.
+Past requests may be approved; inactive employees' requests cannot. Full-day
+leave for today cannot be approved while the employee has an active site, including
+approval of a second half day that would complete a full day. Employees
 with leave history are deactivated rather than deleted.
 
 Both roles can filter the leave page by an inclusive date range and see **Total
 leaves taken (days)**. Totals include only approved days within the range through
-today (UTC), counting half days as 0.5 and including weekends. Future days, pending
+today (IST), counting half days as 0.5 and including weekends. Future days, pending
 requests and rejections are excluded. Blank boundaries mean no date limit.
 The request list includes requests overlapping the range and displays their full
 duration; the total counts only the overlapping elapsed days. Admin status tabs
@@ -371,13 +387,24 @@ per-employee totals (including inactive employees' history). Employee searches
 use literal text, not wildcard patterns. Employees can only view their own
 requests and totals, regardless of employee filters supplied in a URL.
 
+The **Monthly leave entitlement & balance** section lets admins set each
+employee's allowance for a selected India-calendar month, from 0 to 31 days in
+0.5-day increments. This is separate from actual dated leave records. Both roles
+see entitlement, approved + automatic days, and remaining balance; the employee
+dashboard shows the current month. An unset allowance is **Not set**, not zero.
+Remaining = entitlement minus all approved dates in that month (including future
+approved dates) minus automatic leave through the current cutoff. Pending/rejected
+requests do not reserve days. Negative balances are allowed and there is no
+automatic carry-forward. These web changes also appear in Android 1.3.0 without
+reinstalling the app. Apply migration `06ab1c2d3e49` before restarting the server.
+
 The admin dashboard includes clickable **Pending leave requests** and **On leave
 today** cards, refreshed with the existing 15-second live status update. The latter
-counts distinct active employees with approved leave covering today's UTC date,
+counts distinct active employees with approved leave covering today's IST date,
 including either half day (not a real-time morning/afternoon schedule). An employee
 is shown as **On leave** unless they have an active site visit, which retains
-**Onsite** status. Leave is informational and does not block site visits or change
-attendance records.
+**Onsite** status. Full-day approved leave blocks new site starts; half-day leave
+does not. Existing attendance records are not changed by leave approval.
 
 ### Password reset
 

@@ -5,6 +5,7 @@ from datetime import timedelta
 from geosite import create_app
 from geosite.extensions import db
 from geosite.models import Attendance, AssignedSite, AuditLog, LeaveRequest, User, utcnow
+from geosite.timeutils import india_date
 
 
 class LeaveTests(unittest.TestCase):
@@ -23,7 +24,7 @@ class LeaveTests(unittest.TestCase):
         self.other = self.make_user("Other")
         db.session.commit()
         self.client = self.app.test_client()
-        self.today = utcnow().date()
+        self.today = india_date(utcnow())
 
     def tearDown(self):
         db.session.remove()
@@ -182,19 +183,23 @@ class LeaveTests(unittest.TestCase):
         self.assertEqual(data["pending_leave_count"], 1)
         self.assertIn(b"No leave requests found", self.client.get("/admin/leaves?status=today").data)
 
-    def test_expired_and_inactive_requests_cannot_be_approved(self):
+    def test_past_requests_can_be_approved_but_inactive_requests_cannot(self):
         expired = self.add_leave(start_date=self.today - timedelta(days=1),
                                  end_date=self.today - timedelta(days=1))
         inactive = self.add_leave(employee=self.other)
         self.other.is_active = False
         db.session.commit()
         self.login(self.admin)
-        for leave in (expired, inactive):
-            response = self.client.post(f"/admin/leaves/{leave.id}/review",
-                                        data={"decision": "approved"}, follow_redirects=True)
-            self.assertIn(b"cannot be approved", response.data)
-            db.session.refresh(leave)
-            self.assertEqual(leave.status, "pending")
+        response = self.client.post(f"/admin/leaves/{expired.id}/review",
+                                    data={"decision": "approved"}, follow_redirects=True)
+        self.assertIn(b"Leave request approved.", response.data)
+        db.session.refresh(expired)
+        self.assertEqual(expired.status, "approved")
+        response = self.client.post(f"/admin/leaves/{inactive.id}/review",
+                                    data={"decision": "approved"}, follow_redirects=True)
+        self.assertIn(b"cannot be approved", response.data)
+        db.session.refresh(inactive)
+        self.assertEqual(inactive.status, "pending")
 
     def test_employee_with_leave_history_is_not_deleted(self):
         self.add_leave()

@@ -12,9 +12,9 @@ from sqlalchemy import inspect
 from geosite import create_app
 from geosite.attendance import daily_cutoff
 from geosite.extensions import db
-from geosite.models import Attendance, AttendancePolicy, AssignedSite, AuditLog, DailyWorkStatus, LeaveRequest, SiteAssignment, User
+from geosite.models import Attendance, AttendancePolicy, AssignedSite, AuditLog, DailyWorkStatus, LeaveRequest, MonthlyLeaveEntitlement, SiteAssignment, User
 from geosite.timeutils import INDIA_TIME
-from geosite.work_status import attendance_summary, month_bounds
+from geosite.work_status import attendance_summary, month_bounds, monthly_leave_balance
 
 
 class WorkStatusTests(unittest.TestCase):
@@ -67,6 +67,9 @@ class WorkStatusTests(unittest.TestCase):
     def login(self, user):
         self.client.post("/logout")
         self.client.post("/login", data={"email": user.email, "password": "work-status-password"})
+        # Authentication's idle clock is real; attendance uses the fixed policy clock.
+        with self.client.session_transaction() as session:
+            session["last_activity"] = datetime.now(timezone.utc).isoformat()
 
     def submit(self, **values):
         return self.client.post("/employee/work-status", data={
@@ -282,6 +285,183 @@ class WorkStatusTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/visit-monitor", headers=headers).status_code, 401)
 
 
+    def test_daily_selector_assigned_site_only_and_original_location_flow(self):
+        second = AssignedSite(site_name="Second site", customer_name="Other customer", address="Address",
+                              latitude=20, longitude=73, allowed_radius=100)
+        db.session.add(second)
+        db.session.flush()
+        db.session.add(SiteAssignment(employee=self.employee, site=second))
+        db.session.commit()
+        self.login(self.employee)
+        page = self.client.get("/employee")
+        for value in ("onsite", "wfh", "leave", "training", "travelling"):
+            self.assertIn(f'value="{value}"'.encode(), page.data)
+        for site in (self.site, second):
+            self.assertIn(f'<option value="{site.id}">'.encode(), page.data)
+            response = self.client.post("/employee/work-status", data={"work_type": "onsite", "site_id": site.id})
+            self.assertEqual(response.location, f"/visit/{site.id}/checkin-location")
+        self.assertEqual(Attendance.query.count(), 0)
+        self.assertIn(b"Select one of your assigned sites", self.submit(work_type="onsite", site_id="").data)
+        self.login(self.other)
+        self.assertEqual(self.client.post("/employee/work-status", data={
+            "work_type": "onsite", "site_id": self.site.id,
+        }).status_code, 404)
+
+    def test_daily_leave_requires_reason_and_prevents_duplicates(self):
+        self.login(self.employee)
+        self.assertIn(b"Invalid leave request", self.submit(work_type="leave", reason=" ").data)
+        self.assertEqual(LeaveRequest.query.count(), 0)
+        self.assertIn(b"submitted for administrator approval", self.submit(work_type="leave", period="morning").data)
+        self.assertEqual(LeaveRequest.query.one().days, 0.5)
+        self.assertIn(b"overlap", self.submit(work_type="leave", period="full").data)
+        self.assertEqual(LeaveRequest.query.count(), 1)
+        self.assertEqual(DailyWorkStatus.query.count(), 0)
+
+    def test_full_day_approved_leave_blocks_all_site_start_surfaces(self):
+        self.login(self.employee)
+        self.assertEqual(self.client.post(f"/api/visit/{self.site.id}/verify-checkin",
+                                         json={"latitude": 19, "longitude": 72}).status_code, 200)
+        self.leave(date(2026, 10, 27))
+        page = self.client.get("/employee")
+        self.assertIn(b"On leave - approved full day", page.data)
+        self.assertNotIn(b'id="daily-status-form"', page.data)
+        self.assertIn(b"No confirmation is needed", self.submit().data)
+        for url in (f"/visit/start/{self.site.id}", f"/visit/{self.site.id}/checkin"):
+            response = self.client.post(url, data={}, follow_redirects=True)
+            self.assertIn(b"Site starts are blocked", response.data)
+        self.assertEqual(Attendance.query.count(), 0)
+        self.assertEqual(self.client.get(f"/visit/{self.site.id}/checkin-location").status_code, 302)
+        self.assertEqual(self.client.get(f"/visit/{self.site.id}/camera").status_code, 403)
+        response = self.client.post(f"/api/visit/{self.site.id}/verify-checkin",
+                                    json={"latitude": 19, "longitude": 72})
+        self.assertEqual(response.status_code, 409)
+        with self.client.session_transaction() as session:
+            self.assertNotIn("visit_verification", session)
+
+    def test_half_day_allows_site_start_but_complementary_halves_block(self):
+        self.leave(date(2026, 10, 27), period="morning")
+        self.login(self.employee)
+        page = self.client.get("/employee")
+        self.assertIn(b"Approved half-day leave", page.data)
+        self.assertIn(b'id="daily-status-form"', page.data)
+        self.assertEqual(self.client.post(f"/visit/start/{self.site.id}").location,
+                         f"/visit/{self.site.id}/checkin-location")
+        self.assertEqual(self.client.post(f"/api/visit/{self.site.id}/verify-checkin",
+                                         json={"latitude": 19, "longitude": 72}).status_code, 200)
+        self.leave(date(2026, 10, 27), period="afternoon")
+        self.assertIn(b"Site starts are blocked", self.client.post(
+            f"/visit/{self.site.id}/checkin", follow_redirects=True).data)
+        self.assertEqual(Attendance.query.count(), 0)
+
+    def test_admin_add_edit_past_leave_separate_approval_and_audit(self):
+        self.login(self.admin)
+        self.assertEqual(self.client.get("/admin/leaves/new").status_code, 200)
+        values = {"employee_id": str(self.employee.id), "start_date": "2026-10-25",
+                  "end_date": "2026-10-25", "period": "full", "reason": "Admin entered leave"}
+        response = self.client.post("/admin/leaves/new", data=values, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        leave = LeaveRequest.query.one()
+        self.assertEqual(leave.status, "pending")
+        self.client.post(f"/admin/leaves/{leave.id}/review", data={"decision": "approved"})
+        db.session.refresh(leave)
+        self.assertEqual(leave.status, "approved")
+        self.assertEqual(self.client.get(f"/admin/leaves/{leave.id}/edit").status_code, 200)
+        self.client.post(f"/admin/leaves/{leave.id}/edit", data=values)
+        db.session.refresh(leave)
+        self.assertEqual(leave.status, "approved")
+        self.client.post(f"/admin/leaves/{leave.id}/edit", data={**values, "period": "morning",
+                                                               "reason": "Corrected half day"})
+        db.session.refresh(leave)
+        self.assertEqual(leave.status, "pending")
+        self.assertEqual(leave.days, 0.5)
+        self.assertIsNone(leave.reviewed_by_id)
+        self.assertIsNone(leave.reviewed_at)
+        audit = AuditLog.query.filter_by(action="leave_details_saved").order_by(AuditLog.id.desc()).first()
+        self.assertIn("Admin entered leave", audit.details)
+        self.assertIn("Corrected half day", audit.details)
+        self.assertEqual(self.client.post(f"/admin/leaves/{leave.id}/edit",
+                                         data={**values, "employee_id": self.other.id}).status_code, 400)
+        self.assertEqual(leave.employee_id, self.employee.id)
+        self.assertEqual(self.client.post("/admin/leaves/new", data=values).status_code, 400)
+        self.assertEqual(self.client.post("/admin/leaves/new", data={**values, "period": "afternoon"}).status_code, 302)
+
+    def test_admin_approval_cannot_make_active_site_full_day_leave(self):
+        self.visit()
+        morning = self.leave(date(2026, 10, 27), status="pending", period="morning")
+        afternoon = self.leave(date(2026, 10, 27), status="pending", period="afternoon")
+        self.login(self.admin)
+        self.client.post(f"/admin/leaves/{morning.id}/review", data={"decision": "approved"})
+        db.session.refresh(morning)
+        self.assertEqual(morning.status, "approved")
+        response = self.client.post(f"/admin/leaves/{afternoon.id}/review",
+                                    data={"decision": "approved"}, follow_redirects=True)
+        self.assertIn(b"Stop the employee", response.data)
+        db.session.refresh(afternoon)
+        self.assertEqual(afternoon.status, "pending")
+        self.login(self.employee)
+        self.assertIn(b"Stop Site", self.client.get("/employee").data)
+
+    def test_entitlement_upsert_validation_privacy_and_balances(self):
+        month = date(2026, 10, 1)
+        self.leave(date(2026, 10, 31))
+        balance = monthly_leave_balance(self.employee, month, now=self.now)
+        self.assertIsNone(balance["entitlement"])
+        self.assertIsNone(balance["remaining"])
+        self.assertEqual(balance["used"], 2)  # Approved future day plus Monday automatic leave.
+        self.login(self.admin)
+        values = {"employee_id": self.employee.id, "month": "2026-10", "days": "0.5"}
+        self.assertIn(b"Monthly leave entitlement saved", self.client.post(
+            "/admin/leaves/entitlement", data=values, follow_redirects=True).data)
+        balance = monthly_leave_balance(self.employee, month, now=self.now)
+        self.assertEqual(balance["remaining"], -1.5)
+        for invalid in ("NaN", "Infinity", "-1", "31.5", "1.25", "bad", ""):
+            self.assertIn(b"Invalid monthly entitlement", self.client.post(
+                "/admin/leaves/entitlement", data={**values, "days": invalid}, follow_redirects=True).data)
+        for invalid in ("2026-13", "bad", ""):
+            self.assertIn(b"Invalid monthly entitlement", self.client.post(
+                "/admin/leaves/entitlement", data={**values, "month": invalid}, follow_redirects=True).data)
+        self.client.post("/admin/leaves/entitlement", data={**values, "days": "0"})
+        self.assertEqual(MonthlyLeaveEntitlement.query.count(), 1)
+        self.assertEqual(float(MonthlyLeaveEntitlement.query.one().days), 0)
+        self.assertEqual(monthly_leave_balance(self.employee, date(2026, 11, 1), now=self.now)["used"], 0)
+        self.assertIsNone(monthly_leave_balance(self.employee, date(2026, 11, 1), now=self.now)["entitlement"])
+        self.assertEqual(self.client.get("/admin/leaves?leave_month=bad").status_code, 400)
+        self.login(self.employee)
+        self.assertIn(b'id="monthly-entitlement">0 days', self.client.get("/employee").data)
+        self.assertNotIn(self.other.email.encode(), self.client.get("/employee/leaves").data)
+        for url in ("/admin/leaves/entitlement", "/admin/leaves/new"):
+            self.assertEqual(self.client.post(url, data=values).status_code, 403)
+        self.login(self.admin)
+        self.app.config["WTF_CSRF_ENABLED"] = True
+        self.assertEqual(self.client.post("/admin/leaves/entitlement", data=values).status_code, 400)
+        self.assertEqual(self.client.post("/admin/leaves/new", data=values).status_code, 400)
+
+    def test_admin_corrects_work_confirmation_and_employee_cannot_resubmit(self):
+        self.login(self.employee)
+        self.submit()
+        item = DailyWorkStatus.query.one()
+        self.assertEqual(self.client.post(f"/admin/work-status/{item.id}/edit", data={}).status_code, 403)
+        self.login(self.admin)
+        self.client.post(f"/admin/work-status/{item.id}/review", data={"decision": "approved"})
+        self.assertEqual(self.client.get(f"/admin/work-status/{item.id}/edit").status_code, 200)
+        self.client.post(f"/admin/work-status/{item.id}/edit",
+                         data={"work_type": item.work_type, "reason": item.reason})
+        db.session.refresh(item)
+        self.assertEqual(item.status, "approved")
+        self.assertEqual(self.client.post(f"/admin/work-status/{item.id}/edit",
+                                         data={"work_type": "training", "reason": ""}).status_code, 400)
+        self.client.post(f"/admin/work-status/{item.id}/edit",
+                         data={"work_type": "training", "reason": "Corrected by administrator"})
+        db.session.refresh(item)
+        self.assertEqual(item.work_type, "training")
+        self.assertEqual(item.status, "pending")
+        self.assertIsNone(item.reviewed_by_id)
+        self.assertIsNotNone(AuditLog.query.filter_by(action="work_status_corrected").first())
+        self.login(self.employee)
+        self.assertIn(b"already been submitted", self.submit().data)
+        self.assertEqual(DailyWorkStatus.query.count(), 1)
+
+
 class WorkStatusMigrationTests(unittest.TestCase):
     def test_upgrade_policy_activation_and_reversible_schema(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -301,12 +481,15 @@ class WorkStatusMigrationTests(unittest.TestCase):
                     self.assertEqual(db.session.get(AttendancePolicy, 1).effective_from,
                                      datetime.now(INDIA_TIME).date())
                     self.assertEqual(DailyWorkStatus.query.count(), 0)
+                    self.assertIn("monthly_leave_entitlement", inspect(db.engine).get_table_names())
+                    self.assertEqual(MonthlyLeaveEntitlement.query.count(), 0)
                     self.assertIn("site_radius_m", {
                         column["name"] for column in inspect(db.engine).get_columns("attendance")
                     })
                     db.session.remove()
                     downgrade(directory=migrations, revision="e48f9a0b1c27")
                     self.assertNotIn("daily_work_status", inspect(db.engine).get_table_names())
+                    self.assertNotIn("monthly_leave_entitlement", inspect(db.engine).get_table_names())
                     self.assertEqual(User.query.one().name, "Old")
                     upgrade(directory=migrations)
                     self.assertEqual(DailyWorkStatus.query.count(), 0)

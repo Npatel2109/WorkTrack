@@ -115,6 +115,22 @@ class AssignedSite(db.Model):
     attendance_records = db.relationship("Attendance", back_populates="site")
 
 
+class MonthlyLeaveEntitlement(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    month = db.Column(db.Date, nullable=False)
+    days = db.Column(db.Numeric(6, 1), nullable=False)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    employee = db.relationship("User", foreign_keys=[employee_id])
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+    __table_args__ = (
+        db.UniqueConstraint("employee_id", "month", name="uq_leave_entitlement_employee_month"),
+        db.CheckConstraint("days >= 0 AND days <= 31", name="leave_entitlement_valid_days"),
+    )
+
+
 class AttendancePolicy(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     effective_from = db.Column(db.Date, nullable=False)

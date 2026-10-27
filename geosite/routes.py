@@ -33,8 +33,8 @@ from sqlalchemy.orm.exc import StaleDataError
 from .extensions import db
 from .attendance import daily_cutoff, stop_attendance
 from .timeutils import INDIA_TIME, format_ist, india_date
-from .models import AppSettings, AssignedSite, Attendance, AttendancePolicy, AuditLog, DailyWorkStatus, Invoice, LeaveRequest, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
-from .work_status import attendance_summary, month_bounds
+from .models import AppSettings, AssignedSite, Attendance, AttendancePolicy, AuditLog, DailyWorkStatus, Invoice, LeaveRequest, MonthlyLeaveEntitlement, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
+from .work_status import approved_leave_today, attendance_summary, leave_overlap, month_bounds, monthly_leave_balance
 from .services import (
     generate_invoice_pdf,
     generate_site_report_pdf,
@@ -105,6 +105,16 @@ def _employee_site(site_id):
     if not site:
         abort(404)
     return site
+
+
+def _lock_employee(employee_id):
+    return User.query.filter_by(id=employee_id).with_for_update().first_or_404()
+
+
+def _full_day_leave_block():
+    if approved_leave_today(current_user.id, india_date(utcnow()))[1]:
+        return "You are on approved full-day leave today. Site starts are blocked."
+    return None
 
 
 def _attendance_for_user(attendance_id):
@@ -184,7 +194,7 @@ def _leave_counts(today):
 
 def _live_rows(today):
     rows = []
-    on_leave = {leave.employee_id for leave in _leaves_today(utcnow().date())}
+    on_leave = {leave.employee_id for leave in _leaves_today(today)}
     employees = User.query.filter_by(role="employee").order_by(User.name).all()
     for employee in employees:
         active = (
@@ -516,7 +526,7 @@ def admin_dashboard():
         map_sites=AssignedSite.query.filter_by(is_active=True).order_by(AssignedSite.site_name).all(),
         chart_labels=labels,
         chart_values=[counts.get(day, 0) for day in labels],
-        **_leave_counts(utcnow().date()),
+        **_leave_counts(india_date(utcnow())),
     )
 
 
@@ -608,7 +618,7 @@ def live_status():
     today = india_date(utcnow())
     rows = _live_rows(today)
     return jsonify(
-        **_leave_counts(utcnow().date()),
+        **_leave_counts(india_date(utcnow())),
         onsite_count=sum(row["status"] == "onsite" for row in rows),
         pending_report_count=Attendance.query.filter_by(status="report_pending").count(),
         employees=[
@@ -711,6 +721,7 @@ def delete_employee(user_id):
         or Invoice.query.filter_by(employee_id=user_id).first()
         or LeaveRequest.query.filter_by(employee_id=user_id).first()
         or DailyWorkStatus.query.filter_by(employee_id=user_id).first()
+        or MonthlyLeaveEntitlement.query.filter_by(employee_id=user_id).first()
         or SubmittedReport.query.filter_by(employee_id=user_id).first()
         or AuditLog.query.filter_by(user_id=user_id).first()
     )
@@ -905,6 +916,7 @@ def employee_dashboard():
     today = india_date(utcnow())
     start, end = month_bounds(today)
     summary = attendance_summary(current_user, start, end)
+    approved_today, full_day_leave = approved_leave_today(current_user.id, today)
     reports = (
         Attendance.query.filter_by(employee_id=current_user.id, status="completed")
         .order_by(Attendance.checkout_time.desc())
@@ -922,12 +934,19 @@ def employee_dashboard():
         reports=reports,
         monthly_summary=summary, month_start=start, month_end=end, today=today,
         today_confirmation=DailyWorkStatus.query.filter_by(employee_id=current_user.id, work_date=today).first(),
+        approved_today=approved_today, full_day_leave=full_day_leave,
+        today_leave_requests=LeaveRequest.query.filter(
+            LeaveRequest.employee_id == current_user.id, LeaveRequest.start_date <= today,
+            LeaveRequest.end_date >= today, LeaveRequest.status != "approved",
+        ).order_by(LeaveRequest.id.desc()).all(),
+        leave_balance=monthly_leave_balance(current_user, start),
     )
 
 
 @bp.route("/employee/work-status", methods=["POST"])
 @employee_required
 def submit_work_status():
+    _lock_employee(current_user.id)
     now = utcnow()
     today = india_date(now)
     if now >= daily_cutoff(now):
@@ -935,6 +954,18 @@ def submit_work_status():
         return redirect(url_for("main.employee_dashboard"))
     work_type = request.form.get("work_type", "")
     reason = request.form.get("reason", "").strip()
+    if _full_day_leave_block():
+        flash("You are already on approved full-day leave today. No confirmation is needed.", "info")
+        return redirect(url_for("main.employee_dashboard"))
+    if work_type == "onsite":
+        try:
+            site_id = int(request.form.get("site_id", ""))
+        except ValueError:
+            flash("Select one of your assigned sites.", "danger")
+            return redirect(url_for("main.employee_dashboard"))
+        return start_visit(site_id)
+    if work_type == "leave":
+        return _request_employee_leave(today, today, request.form.get("period", "full"), reason, "main.employee_dashboard")
     if work_type not in ("wfh", "travelling", "training") or not 1 <= len(reason) <= 2000:
         flash("Select WFH, Travelling or Training and enter a reason of 1 to 2,000 characters.", "danger")
         return redirect(url_for("main.employee_dashboard"))
@@ -997,6 +1028,31 @@ def review_work_status(status_id):
     else:
         flash("This work status has already been reviewed.", "warning")
     return redirect(url_for("main.admin_work_status"))
+
+
+@bp.route("/admin/work-status/<int:status_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_work_status(status_id):
+    item = db.get_or_404(DailyWorkStatus, status_id)
+    values = {"work_type": item.work_type, "reason": item.reason}
+    if request.method == "POST":
+        _lock_employee(item.employee_id)
+        values = {name: request.form.get(name, "").strip() for name in values}
+        if values["work_type"] not in ("wfh", "training", "travelling") or not 1 <= len(values["reason"]) <= 2000:
+            flash("Select a valid work status and enter a reason of 1 to 2,000 characters.", "danger")
+            return render_template("edit_work_status.html", item=item, values=values), 400
+        if (values["work_type"], values["reason"]) != (item.work_type, item.reason):
+            previous = f"{item.work_type}; {item.status}; reason={item.reason}"
+            item.work_type, item.reason = values["work_type"], values["reason"]
+            item.status, item.reviewed_by_id, item.reviewed_at = "pending", None, None
+            write_audit(current_user, "work_status_corrected",
+                        f"Confirmation {item.id}; before={previous}; after={item.work_type}; reason={item.reason}; pending")
+            db.session.commit()
+            flash("Work confirmation corrected. Review its approval separately.", "success")
+        else:
+            flash("No work status changes to save.", "info")
+        return redirect(url_for("main.admin_work_status"))
+    return render_template("edit_work_status.html", item=item, values=values)
 
 
 def _render_leaves(today, selected_status="all"):
@@ -1071,6 +1127,11 @@ def _render_leaves(today, selected_status="all"):
         query = query.filter_by(status=selected_status)
     elif selected_status != "all":
         abort(400)
+    month_raw = request.args.get("leave_month", india_date(utcnow()).strftime("%Y-%m"))
+    try:
+        balance_month = date.fromisoformat(month_raw + "-01")
+    except ValueError:
+        abort(400, description="Choose a valid entitlement month.")
     return render_template(
         "leaves.html", today=today, selected_status=selected_status,
         leaves=query.order_by(LeaveRequest.created_at.desc()).all(),
@@ -1080,13 +1141,129 @@ def _render_leaves(today, selected_status="all"):
         leave_total=sum(totals.values()),
         employee_totals=[(employee, totals.get(employee.id, 0)) for employee in employees],
         automatic_leave_rows=automatic_leave_rows,
+        balance_month=balance_month,
+        leave_balances=[(employee, monthly_leave_balance(employee, balance_month)) for employee in employees]
+        if current_user.is_admin else [(current_user, monthly_leave_balance(current_user, balance_month))],
     )
+
+
+def _validate_leave_details(start, end, period, reason):
+    if end < start:
+        raise ValueError("The end date must be on or after the start.")
+    if period not in ("full", "morning", "afternoon"):
+        raise ValueError("Choose full-day leave or a morning/afternoon half day.")
+    if period != "full" and start != end:
+        raise ValueError("Half-day leave must start and end on the same date.")
+    if not 1 <= len(reason) <= 2000:
+        raise ValueError("Enter a leave reason of 1 to 2,000 characters.")
+
+
+def _request_employee_leave(start, end, period, reason, destination):
+    _lock_employee(current_user.id)
+    try:
+        _validate_leave_details(start, end, period, reason)
+    except ValueError as error:
+        flash(f"Invalid leave request. {error}", "danger")
+        return redirect(url_for(destination))
+    if leave_overlap(current_user.id, start, end, period):
+        flash("These dates overlap an existing pending or approved leave request.", "danger")
+    elif _active_attendance() and start <= india_date(utcnow()) <= end:
+        flash("Stop your active site before requesting leave for today.", "warning")
+    else:
+        db.session.add(LeaveRequest(
+            employee_id=current_user.id, start_date=start, end_date=end, period=period, reason=reason,
+        ))
+        write_audit(current_user, "leave_requested", f"{start} to {end} ({period}); reason={reason}")
+        db.session.commit()
+        flash("Leave request submitted for administrator approval.", "success")
+    return redirect(url_for(destination))
+
+
+@bp.route("/admin/leaves/new", methods=["GET", "POST"])
+@bp.route("/admin/leaves/<int:leave_id>/edit", methods=["GET", "POST"])
+@admin_required
+def admin_leave_form(leave_id=None):
+    leave = db.get_or_404(LeaveRequest, leave_id) if leave_id is not None else None
+    employees = User.query.filter_by(role="employee").order_by(User.name).all()
+    values = {
+        "employee_id": str(leave.employee_id) if leave else "",
+        "start_date": leave.start_date.isoformat() if leave else "",
+        "end_date": leave.end_date.isoformat() if leave else "",
+        "period": leave.period if leave else "full",
+        "reason": leave.reason if leave else "",
+    }
+    if request.method == "POST":
+        values = {name: request.form.get(name, "").strip() for name in values}
+        try:
+            employee_id = int(values["employee_id"])
+            employee = _lock_employee(employee_id)
+            if employee.role != "employee" or (leave and employee_id != leave.employee_id):
+                raise ValueError("Select the employee who owns this leave.")
+            start = date.fromisoformat(values["start_date"])
+            end = date.fromisoformat(values["end_date"])
+            _validate_leave_details(start, end, values["period"], values["reason"])
+            if leave_overlap(employee_id, start, end, values["period"], leave.id if leave else None):
+                raise ValueError("These dates overlap an existing pending or approved leave request.")
+        except ValueError as error:
+            flash(f"Invalid leave request. {error}", "danger")
+            return render_template("admin_leave_form.html", leave=leave, employees=employees, values=values), 400
+        previous = (
+            f"{leave.start_date} to {leave.end_date}; {leave.period}; {leave.status}; reason={leave.reason}"
+            if leave else "new record"
+        )
+        if leave and (start, end, values["period"], values["reason"]) == (
+            leave.start_date, leave.end_date, leave.period, leave.reason
+        ):
+            flash("No leave changes to save.", "info")
+        else:
+            if leave is None:
+                leave = LeaveRequest(employee_id=employee_id)
+                db.session.add(leave)
+            leave.start_date, leave.end_date = start, end
+            leave.period, leave.reason = values["period"], values["reason"]
+            leave.status, leave.reviewed_by_id, leave.reviewed_at = "pending", None, None
+            db.session.flush()
+            write_audit(current_user, "leave_details_saved",
+                        f"Leave {leave.id}; employee {employee_id}; before={previous}; "
+                        f"after={start} to {end}; {leave.period}; pending; reason={leave.reason}")
+            db.session.commit()
+            flash("Leave saved as pending. Approve or reject it separately.", "success")
+        return redirect(url_for("main.admin_leaves", employee_id=employee_id))
+    return render_template("admin_leave_form.html", leave=leave, employees=employees, values=values)
+
+
+@bp.route("/admin/leaves/entitlement", methods=["POST"])
+@admin_required
+def save_leave_entitlement():
+    try:
+        employee_id = int(request.form.get("employee_id", ""))
+        employee = _lock_employee(employee_id)
+        if employee.role != "employee":
+            raise ValueError("Select a valid employee.")
+        month = date.fromisoformat(request.form.get("month", "") + "-01")
+        days = Decimal(request.form.get("days", ""))
+        if not days.is_finite() or not 0 <= days <= 31 or days * 2 != (days * 2).to_integral_value():
+            raise ValueError("Entitlement must be 0 to 31 days in half-day increments.")
+    except (ValueError, InvalidOperation) as error:
+        flash(f"Invalid monthly entitlement. {error}", "danger")
+        return redirect(url_for("main.admin_leaves"))
+    item = MonthlyLeaveEntitlement.query.filter_by(employee_id=employee_id, month=month).first()
+    old_days = item.days if item else "not set"
+    if item is None:
+        item = MonthlyLeaveEntitlement(employee_id=employee_id, month=month)
+        db.session.add(item)
+    item.days, item.updated_by_id, item.updated_at = days, current_user.id, utcnow()
+    write_audit(current_user, "leave_entitlement_updated",
+                f"Employee {employee_id}; {month:%Y-%m}; {old_days} -> {days} days")
+    db.session.commit()
+    flash("Monthly leave entitlement saved.", "success")
+    return redirect(url_for("main.admin_leaves", leave_month=month.strftime("%Y-%m")))
 
 
 @bp.route("/employee/leaves", methods=["GET", "POST"])
 @employee_required
 def employee_leaves():
-    today = utcnow().date()
+    today = india_date(utcnow())
     if request.method == "POST":
         period = request.form.get("period", "")
         reason = request.form.get("reason", "").strip()
@@ -1095,53 +1272,38 @@ def employee_leaves():
             end = date.fromisoformat(request.form.get("end_date", ""))
             if start < today or end < start:
                 raise ValueError("Choose dates from today onwards, with the end on or after the start.")
-            if period not in ("full", "morning", "afternoon"):
-                raise ValueError("Choose full-day leave or a morning/afternoon half day.")
-            if period != "full" and start != end:
-                raise ValueError("Half-day leave must start and end on the same date.")
-            if not reason or len(reason) > 2000:
-                raise ValueError("Enter a leave reason of 1 to 2,000 characters.")
+            _validate_leave_details(start, end, period, reason)
         except ValueError as error:
             flash(f"Invalid leave request. {error}", "danger")
         else:
-            overlaps = LeaveRequest.query.filter(
-                LeaveRequest.employee_id == current_user.id,
-                LeaveRequest.status.in_(("pending", "approved")),
-                LeaveRequest.start_date <= end,
-                LeaveRequest.end_date >= start,
-            )
-            if period != "full":
-                overlaps = overlaps.filter(LeaveRequest.period.in_(("full", period)))
-            if overlaps.first():
-                flash("These dates overlap an existing pending or approved leave request.", "danger")
-            else:
-                leave = LeaveRequest(
-                    employee_id=current_user.id, start_date=start, end_date=end,
-                    period=period, reason=reason,
-                )
-                db.session.add(leave)
-                write_audit(current_user, "leave_requested", f"{start} to {end} ({period})")
-                db.session.commit()
-                flash("Leave request submitted for administrator approval.", "success")
-                return redirect(url_for("main.employee_leaves"))
+            return _request_employee_leave(start, end, period, reason, "main.employee_leaves")
     return _render_leaves(today)
 
 
 @bp.route("/admin/leaves")
 @admin_required
 def admin_leaves():
-    return _render_leaves(utcnow().date(), request.args.get("status", "all"))
+    return _render_leaves(india_date(utcnow()), request.args.get("status", "all"))
 
 
 @bp.route("/admin/leaves/<int:leave_id>/review", methods=["POST"])
 @admin_required
 def review_leave(leave_id):
     leave = db.get_or_404(LeaveRequest, leave_id)
+    _lock_employee(leave.employee_id)
     decision = request.form.get("decision")
     if decision not in ("approved", "rejected"):
         abort(400)
-    if decision == "approved" and (not leave.employee.is_active or leave.end_date < utcnow().date()):
-        flash("Expired requests and requests from inactive employees cannot be approved.", "danger")
+    if decision == "approved" and not leave.employee.is_active:
+        flash("Requests from inactive employees cannot be approved.", "danger")
+    elif decision == "approved" and leave_overlap(
+        leave.employee_id, leave.start_date, leave.end_date, leave.period, leave.id, statuses=("approved",)
+    ):
+        flash("This leave overlaps another approved leave. Edit the dates or duration first.", "danger")
+    elif decision == "approved" and leave.start_date <= india_date(utcnow()) <= leave.end_date and (
+        leave.period == "full" or approved_leave_today(leave.employee_id, india_date(utcnow()))[0]
+    ) and Attendance.query.filter_by(employee_id=leave.employee_id, status="onsite").first():
+        flash("Stop the employee's active site before approving full-day leave today.", "danger")
     else:
         updated = LeaveRequest.query.filter_by(id=leave_id, status="pending").update({
             "status": decision, "reviewed_by_id": current_user.id, "reviewed_at": utcnow(),
@@ -1159,6 +1321,10 @@ def review_leave(leave_id):
 @employee_required
 def start_visit(site_id):
     site = _employee_site(site_id)
+    blocked = _full_day_leave_block()
+    if blocked:
+        flash(blocked, "warning")
+        return redirect(url_for("main.employee_dashboard"))
     if _active_attendance():
         flash("Finish your current visit before starting another.", "warning")
         return redirect(url_for("main.employee_dashboard"))
@@ -1170,6 +1336,10 @@ def start_visit(site_id):
 @employee_required
 def checkin_location(site_id):
     site = _employee_site(site_id)
+    blocked = _full_day_leave_block()
+    if blocked:
+        flash(blocked, "warning")
+        return redirect(url_for("main.employee_dashboard"))
     if _active_attendance():
         return redirect(url_for("main.employee_dashboard"))
     return render_template("location.html", site=site, flow="checkin")
@@ -1179,6 +1349,9 @@ def checkin_location(site_id):
 @employee_required
 def verify_checkin(site_id):
     site = _employee_site(site_id)
+    blocked = _full_day_leave_block()
+    if blocked:
+        return jsonify(error=blocked), 409
     if _active_attendance():
         return jsonify(error="Finish your current visit before starting another."), 409
     now = utcnow()
@@ -1208,6 +1381,9 @@ def verify_checkin(site_id):
 @employee_required
 def checkin_camera(site_id):
     site = _employee_site(site_id)
+    blocked = _full_day_leave_block()
+    if blocked:
+        abort(403, description=blocked)
     verification = session.get("visit_verification", {})
     if not _valid_verification(verification, "checkin", "site_id", site.id) or _active_attendance():
         abort(403)
@@ -1218,6 +1394,12 @@ def checkin_camera(site_id):
 @employee_required
 def complete_checkin(site_id):
     site = _employee_site(site_id)
+    _lock_employee(current_user.id)
+    blocked = _full_day_leave_block()
+    if blocked:
+        session.pop("visit_verification", None)
+        flash(blocked, "warning")
+        return redirect(url_for("main.employee_dashboard"))
     verification = session.get("visit_verification", {})
     if (
         not _valid_verification(verification, "checkin", "site_id", site.id)

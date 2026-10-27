@@ -480,6 +480,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(visit.checkout_lon, visit.checkin_lon)
         self.assertEqual(visit.checkout_location_source, "last_known")
 
+    def test_half_day_leave_allows_selected_site_gps_and_selfie_start(self):
+        today = datetime.now(INDIA_TIME).date()
+        db.session.add(LeaveRequest(
+            employee_id=self.employee.id, start_date=today, end_date=today,
+            period="morning", reason="Approved half day", status="approved",
+        ))
+        db.session.commit()
+        self._login_employee()
+        response = self.client.post("/employee/work-status",
+                                    data={"work_type": "onsite", "site_id": self.site.id})
+        self.assertEqual(response.location, f"/visit/{self.site.id}/checkin-location")
+        self.assertEqual(self.client.post(f"/api/visit/{self.site.id}/verify-checkin",
+                                         json={"latitude": 0, "longitude": 0}).status_code, 200)
+        self.assertEqual(self.client.get(f"/visit/{self.site.id}/camera").status_code, 200)
+        self.client.post(f"/visit/{self.site.id}/checkin", data={"selfie": self._image_data()})
+        visit = Attendance.query.one()
+        self.assertEqual(visit.status, "onsite")
+        self.assertEqual(visit.site_id, self.site.id)
+        self.assertEqual(visit.employee_id, self.employee.id)
+
     def test_start_requires_valid_fresh_location_and_live_selfie(self):
         self._login_employee()
         self.assertEqual(self.client.get(f"/visit/{self.site.id}/camera").status_code, 403)
@@ -973,7 +993,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(Attendance.query.one().id, visit.id)
         self.client.post("/logout")
         self._login_employee()
-        self.assertNotIn(b"Start Site", self.client.get("/employee").data)
+        self.assertNotIn(f'<option value="{self.site.id}">'.encode(), self.client.get("/employee").data)
         self.assertEqual(self.client.post(
             f"/api/visit/{self.site.id}/verify-checkin", json={"latitude": 0, "longitude": 0}
         ).status_code, 404)

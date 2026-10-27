@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit leave" if leave else "Add employee leave" }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">LEAVE MANAGEMENT</p><h1>{{ "Edit leave #" ~ leave.id if leave else "Add employee leave" }}</h1><p class="text-secondary">Record actual dates, including past dates. Saving creates a pending request; approval is a separate action. Editing an approved/rejected record resets it to pending.</p></div><a class="btn btn-outline-secondary" href="{{ url_for('main.admin_leaves') }}">Back to all leave</a></div>
+<section class="panel-card">
+  <form method="post" class="row g-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="col-12"><label class="form-label" for="leave-employee">Employee</label><select class="form-select" id="leave-employee" name="employee_id" required {% if leave %}disabled{% endif %}><option value="">Select employee</option>{% for employee in employees %}<option value="{{ employee.id }}" {% if values.employee_id == employee.id|string %}selected{% endif %}>{{ employee.name }} - {{ employee.email }}{{ " (inactive)" if not employee.is_active else "" }}</option>{% endfor %}</select>{% if leave %}<input type="hidden" name="employee_id" value="{{ leave.employee_id }}">{% endif %}</div>
+    <div class="col-md-4"><label class="form-label" for="admin-leave-start">Start date</label><input class="form-control" type="date" id="admin-leave-start" name="start_date" value="{{ values.start_date }}" required></div>
+    <div class="col-md-4"><label class="form-label" for="admin-leave-end">End date</label><input class="form-control" type="date" id="admin-leave-end" name="end_date" value="{{ values.end_date }}" required></div>
+    <div class="col-md-4"><label class="form-label" for="admin-leave-period">Duration</label><select class="form-select" id="admin-leave-period" name="period" required>{% for value, label in [('full', 'Full day(s)'), ('morning', 'Half day - morning'), ('afternoon', 'Half day - afternoon')] %}<option value="{{ value }}" {% if values.period == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="col-12"><label class="form-label" for="admin-leave-reason">Reason</label><textarea class="form-control" id="admin-leave-reason" name="reason" maxlength="2000" rows="3" required>{{ values.reason }}</textarea></div>
+    <div class="col-12"><button class="btn btn-primary">Save as pending</button></div>
+  </form>
+</section>
+{% endblock %}

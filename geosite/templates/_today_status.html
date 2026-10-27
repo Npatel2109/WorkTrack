@@ -1,0 +1,61 @@
+<section class="panel-card mb-4" id="today-work-status">
+  <div class="section-title"><div><p class="eyebrow">DAILY ATTENDANCE</p><h2>Today's Work Status</h2></div><span class="small text-nowrap">{{ today.strftime("%d %b %Y") }} IST</span></div>
+  {% if approved_today %}
+  <div class="alert alert-info" id="today-approved-leave">
+    <strong>{{ "On leave - approved full day" if full_day_leave else "Approved half-day leave" }}</strong>
+    {% for leave in approved_today %}<div>{{ leave.period_label }}: {{ leave.reason }}</div>{% endfor %}
+    {% if full_day_leave %}<div>No daily submission is needed. Site starts are blocked today.</div>{% else %}<div>You can start a site for the working part of the day.</div>{% endif %}
+  </div>
+  {% endif %}
+  {% if active_attendance %}
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+    <div><span class="status-pill onsite">On Site</span><h3 class="h5 mt-2">{{ active_attendance.site.site_name }}</h3><div>{{ active_attendance.site.customer_name }}</div><div class="small text-secondary">Started: {{ active_attendance.checkin_time|ist }}</div></div>
+    <a class="btn btn-warning btn-lg" href="{{ url_for('main.checkout_location', attendance_id=active_attendance.id) }}">Stop Site</a>
+  </div>
+  {% endif %}
+  {% if today_confirmation %}
+  <p class="mt-3 mb-1"><strong>{{ today_confirmation.type_label }}</strong> <span class="status-pill {{ today_confirmation.status }}">{{ today_confirmation.status|title }}</span></p>
+  <p class="text-break">{{ today_confirmation.reason }}</p><p class="small text-secondary">One work confirmation per day. Contact admin for corrections.</p>
+  {% endif %}
+  {% for leave in today_leave_requests %}<div class="py-2"><strong>Leave - {{ leave.period_label }}</strong> <span class="status-pill {{ leave.status }}">{{ leave.status|title }}</span><div class="small text-break">{{ leave.reason }}</div></div>{% endfor %}
+  {% if not full_day_leave and not active_attendance %}
+  <form method="post" action="{{ url_for('main.submit_work_status') }}" class="row g-3 mt-1" id="daily-status-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="col-md-4">
+      <label class="form-label" for="work-type">Today's status</label>
+      <select class="form-select" id="work-type" name="work_type" required>
+        <option value="">Select status</option>
+        <option value="onsite" {% if not sites %}disabled{% endif %}>On Site</option>
+        <option value="wfh" {% if today_confirmation %}disabled{% endif %}>WFH</option>
+        <option value="leave">Leave</option>
+        <option value="training" {% if today_confirmation %}disabled{% endif %}>Training</option>
+        <option value="travelling" {% if today_confirmation %}disabled{% endif %}>Travelling</option>
+      </select>
+    </div>
+    <div class="col-md-8" id="daily-site-fields" hidden>
+      <label class="form-label" for="daily-site">Assigned site</label>
+      <select class="form-select" id="daily-site" name="site_id" required disabled>
+        <option value="">Select one site</option>{% for site in sites %}<option value="{{ site.id }}">{{ site.site_name }} - {{ site.customer_name }}</option>{% endfor %}
+      </select>
+      <p class="form-text">Start Site continues to location capture and live selfie. Your site becomes active after confirmation.</p>
+    </div>
+    <div class="col-md-4" id="daily-leave-fields" hidden>
+      <label class="form-label" for="daily-leave-period">Leave duration</label>
+      <select class="form-select" id="daily-leave-period" name="period" required disabled><option value="full">Full day</option><option value="morning">Half day - morning</option><option value="afternoon">Half day - afternoon</option></select>
+    </div>
+    <div class="col-12" id="daily-comment-fields" hidden>
+      <label class="form-label" for="work-reason">Comment / reason</label>
+      <textarea class="form-control" id="work-reason" name="reason" maxlength="2000" rows="2" required disabled></textarea>
+      <p class="form-text">Required for WFH, Leave, Training and Travelling. Administrator approval is required before 23:59 IST to avoid automatic leave. Leave requests remain pending until reviewed.</p>
+    </div>
+    <div class="col-12" id="daily-submit-fields" hidden><button class="btn btn-primary" id="daily-submit" disabled>Submit for approval</button></div>
+    <noscript><p class="text-danger">Enable JavaScript to choose your status and assigned site.</p></noscript>
+  </form>
+  {% if not sites %}<p class="small text-secondary mt-2">No active assigned sites. Contact your administrator if you need to work onsite.</p>{% endif %}
+  {% endif %}
+  {% if monthly_summary.confirmations %}
+  <details class="mt-3"><summary>This month's work confirmations</summary>
+    {% for item in monthly_summary.confirmations %}<div class="py-2 border-bottom">{{ item.work_date.strftime("%d %b %Y") }} - {{ item.type_label }} <span class="status-pill {{ item.status }}">{{ item.status|title }}</span><div class="small text-break">{{ item.reason }}</div>{% if item.reviewed_by %}<div class="small text-secondary">{{ item.reviewed_by.name }} - {{ item.reviewed_at|ist }}</div>{% endif %}</div>{% endfor %}
+  </details>
+  {% endif %}
+</section>
