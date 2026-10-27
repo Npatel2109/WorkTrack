@@ -19,6 +19,8 @@ a:hover { color: #214dc7; }
 .brand-logo-image.brand-mark { border-radius: 6px; }
 .brand-logo-image.login-symbol { border-radius: 16px; }
 .brand-preview { width: 72px; height: 72px; object-fit: contain; padding: 4px; background: #fff; border: 1px solid var(--border); border-radius: 12px; }
+.logo-crop { max-width: 720px; }
+.logo-crop-canvas { display: block; max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 8px; touch-action: none; cursor: crosshair; }
 .nav-link { color: #d7deec !important; font-size: .92rem; padding-inline: .8rem !important; }
 .nav-link:hover { color: #fff !important; }
 .page-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: .25rem 0 1.6rem; }
@@ -71,6 +73,7 @@ a:hover { color: #214dc7; }
 .login-shell { min-height: calc(100vh - 165px); display: grid; place-items: center; padding: 1.5rem 0; }
 .login-card { width: min(100%, 460px); padding: 2.4rem; }
 .login-symbol { height: 54px; width: 54px; font-size: 1.65rem; margin-bottom: 1.3rem; border-radius: 16px; }
+.login-page-symbol { width: 104px; height: 104px; font-size: 3rem; border-radius: 24px; }
 .form-control, .form-select { border-color: #dfe5ed; min-height: 42px; color: var(--ink); }
 .form-control:focus, .form-select:focus { border-color: #8da7ff; box-shadow: 0 0 0 .2rem #3868ee18; }
 .form-label { font-size: .83rem; font-weight: 650; }

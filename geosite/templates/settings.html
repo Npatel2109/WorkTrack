@@ -4,14 +4,14 @@
 <div class="page-heading"><div><p class="eyebrow">ADMINISTRATION</p><h1>App settings</h1></div></div>
 <section class="panel-card mb-4" id="brand-settings">
   <div class="section-title"><h2>Company logo</h2></div>
-  <p class="text-secondary">Upload a PNG, JPEG, or WebP image up to 2 MB. It will replace the G mark in the navigation bar, sign-in page, and password recovery pages.</p>
+  <p class="text-secondary">Upload a PNG, JPEG, or WebP image up to 2 MB. You can optionally crop it to a square before uploading. It will replace the G mark in the navigation bar, sign-in page, and password recovery pages.</p>
   {% if settings and settings.brand_logo_filename %}
   <div class="d-flex align-items-center gap-3 mb-3">
     <img class="brand-preview" src="{{ url_for('main.brand_logo') }}" alt="Current company logo">
     <span class="small text-secondary">Current logo</span>
   </div>
   {% endif %}
-  <form method="post" enctype="multipart/form-data" class="d-flex flex-wrap align-items-end gap-3">
+  <form id="brand-logo-form" method="post" enctype="multipart/form-data" class="d-flex flex-wrap align-items-end gap-3">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="section" value="brand">
     <div><label class="form-label" for="brand-logo">Logo image</label>
@@ -21,6 +21,16 @@
     <button class="btn btn-outline-danger" name="action" value="remove" formnovalidate>Remove logo</button>
     {% endif %}
   </form>
+  <div id="brand-logo-crop" class="logo-crop mt-3" hidden>
+    <p class="form-text mb-2">Drag on the image to select a square crop. Uploading the original image without cropping is also supported.</p>
+    <canvas id="brand-logo-crop-canvas" class="logo-crop-canvas" aria-label="Logo crop selection. Drag to select a square area." tabindex="0"></canvas>
+    <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+      <button class="btn btn-sm btn-outline-primary" id="apply-logo-crop" type="button">Use square crop</button>
+      <button class="btn btn-sm btn-outline-secondary" id="use-original-logo" type="button" hidden>Use original image</button>
+      <span class="small text-secondary" id="brand-logo-crop-status" role="status" aria-live="polite"></span>
+    </div>
+    <img id="brand-logo-crop-preview" class="brand-preview mt-2" alt="Preview of cropped logo" hidden>
+  </div>
 </section>
 <section class="panel-card mb-4" id="email-settings">
   <div class="section-title"><h2>Email (password reset)</h2></div>
@@ -73,4 +83,7 @@
     <button class="btn btn-primary">Save settings</button>
   </form>
 </section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/logo-crop.js') }}"></script>
 {% endblock %}

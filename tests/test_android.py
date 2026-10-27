@@ -1,3 +1,4 @@
+import re
 from io import BytesIO
 import tempfile
 import unittest
@@ -216,6 +217,28 @@ class MailSettingsTests(SettingsTestCase):
 
 
 class BrandLogoTests(SettingsTestCase):
+    def test_logo_upload_form_posts_its_csrf_token(self):
+        self.login(self.admin)
+        self.app.config["WTF_CSRF_ENABLED"] = True
+        page = self.client.get("/admin/settings")
+        match = re.search(rb'name="csrf_token" value="([^"]+)"', page.data)
+        self.assertIsNotNone(match)
+
+        logo = BytesIO()
+        Image.new("RGB", (4, 4), "blue").save(logo, format="PNG")
+        response = self.client.post(
+            "/admin/settings",
+            data={
+                "csrf_token": match.group(1).decode(),
+                "section": "brand",
+                "action": "upload",
+                "brand_logo": (BytesIO(logo.getvalue()), "company.png"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=True,
+        )
+        self.assertIn(b"Brand logo uploaded", response.data)
+
     def test_admin_can_upload_logo_for_all_brand_marks_and_remove_it(self):
         self.assertIn(b'<span class="login-symbol">G</span>', self.client.get("/login").data)
         self.login(self.admin)

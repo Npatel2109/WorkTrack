@@ -296,7 +296,8 @@ shown separately from pending/rejected request days.
 
 Admins can upload or remove the company logo under **Settings > Company logo**.
 It replaces the G brand mark in the navigation bar, sign-in page and password
-recovery pages. PNG, JPEG and WebP files up to 2 MB are supported.
+recovery pages. PNG, JPEG and WebP files up to 2 MB are supported, with optional
+square cropping before upload.
 
 The employee dashboard has one **Today's Work Status** box with **On Site**,
 **WFH**, **Leave**, **Training** and **Travelling**. On Site reveals assigned
