@@ -1,14 +1,14 @@
 """Add an admin-configurable company logo.
 
 Revision ID: f60a0b1c2d39
-Revises: e48f9a0b1c27
+Revises: 17bc2d3e4f50
 """
 from alembic import op
 import sqlalchemy as sa
 
 
 revision = "f60a0b1c2d39"
-down_revision = "e48f9a0b1c27"
+down_revision = "17bc2d3e4f50"
 branch_labels = None
 depends_on = None
 
