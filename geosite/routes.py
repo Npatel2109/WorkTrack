@@ -1902,19 +1902,8 @@ def capture_visit_location(attendance_id):
     radius = attendance.site_radius_m if attendance.site_radius_m is not None else attendance.site.allowed_radius
     distance = haversine_distance(reference_lat, reference_lon, latitude, longitude)
     within_radius = distance <= radius
-    notification_key = f"outside_site_notified_{attendance.id}"
-    notify_outside = False
-    if not within_radius:
-        last_notified = session.get(notification_key)
-        try:
-            last_notified_at = datetime.fromisoformat(last_notified) if last_notified else None
-        except (TypeError, ValueError):
-            last_notified_at = None
-        if last_notified_at is None or utcnow() - last_notified_at >= timedelta(minutes=30):
-            notify_outside = True
-            session[notification_key] = utcnow().isoformat()
     return jsonify(recorded=True, distance=round(distance, 1), within_radius=within_radius,
-                   radius_m=radius, notify_outside=notify_outside)
+                   radius_m=radius)
 
 
 def _visit_monitor_serializer():
