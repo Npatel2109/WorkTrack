@@ -10,6 +10,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {% if report %}<input type="hidden" name="revision_number" value="{{ values.revision_number }}">{% endif %}
     <div class="row g-3">
+      <div class="col-md-4"><label class="form-label" for="report-site">Site</label><select class="form-select" id="report-site" name="site_id" required><option value="">Select an assigned site</option>{% for site in sites %}<option value="{{ site.id }}" {% if values.site_id|string == site.id|string %}selected{% endif %}>{{ site.site_name }} - {{ site.customer_name }}{% if site.id not in assigned_site_ids or not site.is_active %} (no longer assigned){% endif %}</option>{% endfor %}</select></div>
       <div class="col-md-4"><label class="form-label" for="report-start">Start date</label><input class="form-control" id="report-start" type="date" name="start_date" value="{{ values.start_date }}" required></div>
       <div class="col-md-4"><label class="form-label" for="report-end">End date</label><input class="form-control" id="report-end" type="date" name="end_date" value="{{ values.end_date }}" required></div>
       <div class="col-md-4"><label class="form-label" for="report-mandays">Total man-days</label><input class="form-control" id="report-mandays" type="number" name="total_mandays" min="1" max="2147483647" step="1" value="{{ values.total_mandays }}" required><div class="form-text">Enter a positive whole number. This total is not calculated automatically.</div></div>

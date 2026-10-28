@@ -48,7 +48,7 @@ class WorkflowTests(unittest.TestCase):
             designation="Field Engineer",
         )
         self.employee.set_password("engineer-password-123")
-        self.project = Project(name="Project Two")
+        self.project = Project(project_number="PRJ-002", name="Project Two")
         db.session.add_all([self.admin, self.employee, self.project])
         db.session.flush()
         self.site = AssignedSite(
@@ -240,7 +240,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.post(url, data={}).status_code, 403)
         self.client.post("/logout")
         self.client.post("/login", data={"email": self.admin.email, "password": "admin-password-123"})
-        project = Project(name="Commissioning")
+        project = Project(project_number="PRJ-003", name="Commissioning")
         db.session.add(project)
         db.session.commit()
         self.client.post(url, data={"project_id": str(project.id), "report_company": "Company",
@@ -656,9 +656,18 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Project list", response.data)
         self.assertIn(b"Project", self.client.get("/admin/sites").data)
+        self.client.post("/admin/projects", data={"name": "Missing number"})
+        self.assertIsNone(Project.query.filter_by(name="Missing number").first())
 
-        self.client.post("/admin/projects", data={"name": "  New Project  "})
+        self.client.post("/admin/projects", data={
+            "project_number": " prj-001 ", "name": "  New Project  ",
+        })
         project = Project.query.filter_by(name="New Project").one()
+        self.assertEqual(project.project_number, "PRJ-001")
+        self.client.post("/admin/projects", data={
+            "project_number": "prj-001", "name": "Duplicate number",
+        })
+        self.assertIsNone(Project.query.filter_by(name="Duplicate number").first())
         site_payload = self._site_payload(project_id=str(project.id))
         response = self.client.post("/admin/sites", data=site_payload, follow_redirects=True)
         self.assertEqual(response.status_code, 200)
@@ -668,9 +677,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(site.report_company, REPORT_COMPANY_NAME)
         self.assertIn(b"Blackpurple automation", response.data)
 
-        self.client.post(f"/admin/projects/{project.id}/edit", data={"name": "Renamed Project"})
+        self.client.post(f"/admin/projects/{project.id}/edit", data={
+            "project_number": "PRJ-101", "name": "Renamed Project",
+        })
+        self.assertEqual(project.project_number, "PRJ-101")
         db.session.refresh(site)
         self.assertEqual(site.project_name, "Renamed Project")
+        self.assertIn(b"PRJ-101 - Renamed Project", self.client.get("/admin/sites").data)
         response = self.client.post(
             f"/admin/projects/{project.id}/delete", data={}, follow_redirects=True,
         )
@@ -879,7 +892,7 @@ class WorkflowTests(unittest.TestCase):
         for value in (b'value="South Site"', b'value="19.0"', b'Project Two',
                       b'Blackpurple automation', b'First\nSecond', b'Save changes'):
             self.assertIn(value, form.data)
-        updated_project = Project(name="Updated Project")
+        updated_project = Project(project_number="PRJ-004", name="Updated Project")
         db.session.add(updated_project)
         db.session.commit()
         response = self.client.post(url, data=self._site_payload(

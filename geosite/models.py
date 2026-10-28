@@ -122,6 +122,7 @@ class AssignedSite(db.Model):
 
 class Project(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    project_number = db.Column(db.String(80), nullable=False, unique=True)
     name = db.Column(db.String(250), nullable=False, unique=True)
     sites = db.relationship("AssignedSite", back_populates="project")
 
@@ -264,10 +265,12 @@ class AuditLog(db.Model):
 class SubmittedReport(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("assigned_sites.id"), index=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
     revision_number = db.Column(db.Integer, nullable=False, default=1)
 
     employee = db.relationship("User")
+    site = db.relationship("AssignedSite")
     versions = db.relationship(
         "SubmittedReportVersion", back_populates="report",
         order_by="SubmittedReportVersion.revision_number.desc()",

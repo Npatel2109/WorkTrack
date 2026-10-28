@@ -68,9 +68,9 @@ class ProjectMigrationTests(unittest.TestCase):
                     upgrade(directory=migrations)
 
                     projects = db.session.execute(text(
-                        "SELECT id, name FROM project ORDER BY id"
+                        "SELECT id, project_number, name FROM project ORDER BY id"
                     )).all()
-                    self.assertEqual(projects, [(10, "Legacy project")])
+                    self.assertEqual(projects, [(10, "LEGACY-10", "Legacy project")])
                     sites = db.session.execute(text("""
                         SELECT id, project_id, project_name, report_company
                         FROM assigned_sites ORDER BY id

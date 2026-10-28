@@ -11,6 +11,8 @@
       <div class="section-title"><h2>Add project</h2></div>
       <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="form-label" for="project-number">Project number</label>
+        <input class="form-control mb-3" id="project-number" name="project_number" maxlength="80" value="{{ values.project_number if values else '' }}" required>
         <label class="form-label" for="project-name">Project name</label>
         <input class="form-control mb-3" id="project-name" name="name" maxlength="250" value="{{ values.name if values else '' }}" required>
         <button class="btn btn-primary w-100">Add project</button>
@@ -22,20 +24,20 @@
       <div class="section-title"><h2>Projects <span class="count-badge">{{ projects|length }}</span></h2></div>
       <div class="table-responsive">
         <table class="table align-middle">
-          <thead><tr><th>Project name</th><th>Sites</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Project number and name</th><th>Sites</th><th>Actions</th></tr></thead>
           <tbody>
             {% for project in projects %}
             <tr>
-              <td><form class="d-flex flex-wrap gap-2" method="post" action="{{ url_for('main.edit_project', project_id=project.id) }}">
+              <td><form class="d-flex flex-wrap gap-2" id="edit-project-{{ project.id }}" method="post" action="{{ url_for('main.edit_project', project_id=project.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input class="form-control" name="project_number" maxlength="80" aria-label="Project number" value="{{ project.project_number }}" required>
                 <input class="form-control" name="name" maxlength="250" aria-label="Project name" value="{{ project.name }}" required>
-                <button class="btn btn-sm btn-outline-primary">Save</button>
               </form></td>
               <td>{{ project.sites|length }}</td>
-              <td><form method="post" action="{{ url_for('main.delete_project', project_id=project.id) }}" onsubmit="return confirm('Delete this project?')">
+              <td><div class="d-flex flex-wrap gap-2"><button class="btn btn-sm btn-outline-primary" type="submit" form="edit-project-{{ project.id }}">Save</button><form method="post" action="{{ url_for('main.delete_project', project_id=project.id) }}" onsubmit="return confirm('Delete this project?')">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="btn btn-sm btn-outline-danger" {% if project.sites %}disabled title="Project is assigned to sites"{% endif %}>Delete</button>
-              </form></td>
+              </form></div></td>
             </tr>
             {% else %}<tr><td class="text-secondary" colspan="3">No projects yet.</td></tr>{% endfor %}
           </tbody>

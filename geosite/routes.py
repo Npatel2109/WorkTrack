@@ -873,16 +873,26 @@ def sites(site_id=None):
 @admin_required
 def projects():
     if request.method == "POST":
+        project_number = request.form.get("project_number", "").strip().upper()
         name = request.form.get("name", "").strip()
-        if not name or len(name) > 250:
+        if not project_number or len(project_number) > 80:
+            flash("Enter a project number of at most 80 characters.", "danger")
+        elif not name or len(name) > 250:
             flash("Enter a project name of at most 250 characters.", "danger")
+        elif Project.query.filter(func.upper(Project.project_number) == project_number).first():
+            flash("A project with that number already exists.", "danger")
         elif Project.query.filter(func.lower(Project.name) == name.lower()).first():
             flash("A project with that name already exists.", "danger")
         else:
-            project = Project(name=name)
+            project = Project(project_number=project_number, name=name)
             db.session.add(project)
-            write_audit(current_user, "project_created", name)
-            db.session.commit()
+            write_audit(current_user, "project_created", f"{project_number}: {name}")
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                flash("A project with that number or name already exists.", "danger")
+                return redirect(url_for("main.projects"))
             flash("Project added.", "success")
             return redirect(url_for("main.projects"))
     return render_template(
@@ -896,19 +906,32 @@ def projects():
 @admin_required
 def edit_project(project_id):
     project = db.get_or_404(Project, project_id)
+    project_number = request.form.get("project_number", project.project_number).strip().upper()
     name = request.form.get("name", "").strip()
-    if not name or len(name) > 250:
+    if not project_number or len(project_number) > 80:
+        flash("Enter a project number of at most 80 characters.", "danger")
+    elif not name or len(name) > 250:
         flash("Enter a project name of at most 250 characters.", "danger")
+    elif Project.query.filter(
+        func.upper(Project.project_number) == project_number, Project.id != project.id
+    ).first():
+        flash("A project with that number already exists.", "danger")
     elif Project.query.filter(
         func.lower(Project.name) == name.lower(), Project.id != project.id
     ).first():
         flash("A project with that name already exists.", "danger")
     else:
+        project.project_number = project_number
         project.name = name
         for site in project.sites:
             site.project_name = name
-        write_audit(current_user, "project_updated", f"Project {project.id}: {name}")
-        db.session.commit()
+        write_audit(current_user, "project_updated", f"{project_number}: {name}")
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash("A project with that number or name already exists.", "danger")
+            return redirect(url_for("main.projects"))
         flash("Project updated.", "success")
     return redirect(url_for("main.projects"))
 
@@ -1033,8 +1056,9 @@ def delete_site(site_id):
     elif (
         Attendance.query.filter_by(site_id=site_id).first()
         or Invoice.query.filter_by(site_id=site_id).first()
+        or SubmittedReport.query.filter_by(site_id=site_id).first()
     ):
-        flash("This site has attendance or invoice history and cannot be deleted.", "danger")
+        flash("This site has attendance, invoice or submitted-report history and cannot be deleted.", "danger")
     else:
         write_audit(current_user, "site_deleted", site.site_name)
         db.session.delete(site)
@@ -1815,7 +1839,8 @@ def _submitted_report_for_user(report_id):
 @login_required
 def submitted_reports():
     query = SubmittedReport.query.options(
-        joinedload(SubmittedReport.employee), selectinload(SubmittedReport.versions)
+        joinedload(SubmittedReport.employee), joinedload(SubmittedReport.site),
+        selectinload(SubmittedReport.versions),
     )
     if not current_user.is_admin:
         query = query.filter_by(employee_id=current_user.id)
@@ -1832,19 +1857,40 @@ def submitted_report_form(report_id=None):
     report = _submitted_report_for_user(report_id) if report_id is not None else None
     current = report.current_version if report else None
     values = {
+        "site_id": str(report.site_id) if report and report.site_id else "",
         "start_date": current.start_date.isoformat() if current else "",
         "end_date": current.end_date.isoformat() if current else "",
         "total_mandays": current.total_mandays if current else "",
         "revision_number": report.revision_number if report else "",
     }
+    report_sites = AssignedSite.query.filter_by(is_active=True).filter(
+        AssignedSite.assignments.any(employee_id=current_user.id, is_active=True)
+    ).order_by(AssignedSite.site_name).all()
+    assigned_site_ids = {site.id for site in report_sites}
+    if report and report.site and all(site.id != report.site.id for site in report_sites):
+        report_sites.append(report.site)
 
     def render_form(status=200):
-        return render_template("submitted_report_form.html", report=report, values=values), status
+        return render_template(
+            "submitted_report_form.html", report=report, values=values, sites=report_sites,
+            assigned_site_ids=assigned_site_ids,
+        ), status
 
     if request.method == "GET":
         return render_form()
     values = {name: request.form.get(name, "").strip() for name in values}
     try:
+        try:
+            site_id = int(values["site_id"])
+        except ValueError:
+            raise ValueError("Select an active site assigned to you.") from None
+        site = AssignedSite.query.filter_by(id=site_id, is_active=True).filter(
+            AssignedSite.assignments.any(employee_id=current_user.id, is_active=True)
+        ).first()
+        if site is None and report and report.site_id == site_id:
+            site = report.site
+        if site is None:
+            raise ValueError("Select an active site assigned to you.")
         start = date.fromisoformat(values["start_date"])
         end = date.fromisoformat(values["end_date"])
         if end < start:
@@ -1881,16 +1927,19 @@ def submitted_report_form(report_id=None):
 
     if current and not filename and (
         start, end, total_mandays
-    ) == (current.start_date, current.end_date, current.total_mandays):
+    ) == (current.start_date, current.end_date, current.total_mandays) and report.site_id == site.id:
         flash("No report changes to save.", "info")
         return redirect(url_for("main.submitted_report_detail", report_id=report.id))
 
     committed = False
     try:
         if report is None:
-            report = SubmittedReport(employee_id=current_user.id, revision_number=1)
+            report = SubmittedReport(
+                employee_id=current_user.id, site=site, revision_number=1
+            )
             db.session.add(report)
         else:
+            report.site = site
             report.revision_number += 1
         version = SubmittedReportVersion(
             report=report, revision_number=report.revision_number,
@@ -1909,7 +1958,8 @@ def submitted_report_form(report_id=None):
         write_audit(
             current_user, action,
             f"Submitted report {report.id}; version {version.revision_number}; "
-            f"{start} to {end}; man-days={total_mandays}; file={original_filename}",
+            f"site={site.site_name}; {start} to {end}; "
+            f"man-days={total_mandays}; file={original_filename}",
             ip_address=request.remote_addr,
         )
         db.session.commit()

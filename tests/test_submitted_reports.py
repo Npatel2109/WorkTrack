@@ -15,7 +15,10 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from geosite import create_app
 from geosite.extensions import db
-from geosite.models import AuditLog, SubmittedReport, SubmittedReportVersion, User
+from geosite.models import (
+    AssignedSite, AuditLog, SiteAssignment, SubmittedReport,
+    SubmittedReportVersion, User,
+)
 
 
 class SubmittedReportTests(unittest.TestCase):
@@ -32,6 +35,13 @@ class SubmittedReportTests(unittest.TestCase):
         self.employee = self.make_user("Engineer")
         self.other = self.make_user("Other")
         self.admin = self.make_user("Admin", role="admin")
+        self.site = AssignedSite(
+            site_name="North Site", customer_name="Example Customer",
+            address="1 Example Road", latitude=19, longitude=72, allowed_radius=100,
+        )
+        db.session.add(self.site)
+        db.session.flush()
+        db.session.add(SiteAssignment(employee=self.employee, site=self.site))
         db.session.commit()
         self.client = self.app.test_client()
 
@@ -66,6 +76,7 @@ class SubmittedReportTests(unittest.TestCase):
 
     def submit(self, **overrides):
         data = {
+            "site_id": str(self.site.id),
             "start_date": "2026-10-01", "end_date": "2026-10-10",
             "total_mandays": "8",
             "pdf": (io.BytesIO(self.pdf_bytes()), "report.pdf"),
@@ -76,6 +87,7 @@ class SubmittedReportTests(unittest.TestCase):
     def edit(self, report, **overrides):
         current = report.current_version
         data = {
+            "site_id": str(report.site_id or self.site.id),
             "start_date": current.start_date.isoformat(), "end_date": current.end_date.isoformat(),
             "total_mandays": str(current.total_mandays), "revision_number": str(report.revision_number),
         }
@@ -86,15 +98,18 @@ class SubmittedReportTests(unittest.TestCase):
     def download_url(report, version):
         return f"/submitted-reports/{report.id}/versions/{version.id}/download"
 
-    def test_submit_without_site_assignment_and_download_by_owner_and_admin(self):
+    def test_submit_assigned_site_and_download_by_owner_and_admin(self):
         self.login(self.employee)
         self.assertIn(b"Submitted reports", self.client.get("/employee").data)
-        self.assertIn(b"Submit report", self.client.get("/employee/submitted-reports/new").data)
+        form = self.client.get("/employee/submitted-reports/new")
+        self.assertIn(b"Submit report", form.data)
+        self.assertIn(b"North Site - Example Customer", form.data)
         response = self.submit(employee_id=str(self.other.id), total_mandays="12")
         self.assertEqual(response.status_code, 302)
         report = SubmittedReport.query.one()
         current = report.current_version
         self.assertEqual(report.employee_id, self.employee.id)
+        self.assertEqual(report.site_id, self.site.id)
         self.assertEqual(current.total_mandays, 12)
         self.assertEqual(current.revision_number, 1)
         self.assertTrue(current.pdf_replaced)
@@ -114,6 +129,53 @@ class SubmittedReportTests(unittest.TestCase):
             self.assertIn("attachment", download.headers["Content-Disposition"])
             self.assertEqual(download.headers["Cache-Control"], "private, no-store")
             download.close()
+        self.login(self.admin)
+        deletion = self.client.post(
+            f"/admin/sites/{self.site.id}/delete", follow_redirects=True
+        )
+        self.assertIn(b"submitted-report history and cannot be deleted", deletion.data)
+        self.assertIsNotNone(db.session.get(AssignedSite, self.site.id))
+
+    def test_submission_requires_an_active_site_assigned_to_the_employee(self):
+        self.login(self.employee)
+        unassigned_site = AssignedSite(
+            site_name="Other Site", customer_name="Other Customer",
+            address="2 Example Road", latitude=20, longitude=73, allowed_radius=100,
+        )
+        db.session.add(unassigned_site)
+        db.session.commit()
+        missing = self.submit(site_id="")
+        self.assertEqual(missing.status_code, 400)
+        self.assertIn(b"Select an active site assigned to you.", missing.data)
+        unassigned = self.submit(site_id=str(unassigned_site.id))
+        self.assertEqual(unassigned.status_code, 400)
+        self.assertEqual(SubmittedReport.query.count(), 0)
+
+    def test_edit_can_change_site_and_preserves_a_historical_unassigned_site(self):
+        self.login(self.employee)
+        self.submit()
+        report = SubmittedReport.query.one()
+        second_site = AssignedSite(
+            site_name="South Site", customer_name="Example Customer",
+            address="3 Example Road", latitude=21, longitude=74, allowed_radius=100,
+        )
+        db.session.add(second_site)
+        db.session.flush()
+        db.session.add(SiteAssignment(employee=self.employee, site=second_site))
+        db.session.commit()
+        response = self.edit(report, site_id=str(second_site.id), total_mandays="9")
+        self.assertEqual(response.status_code, 302)
+        db.session.refresh(report)
+        self.assertEqual(report.site_id, second_site.id)
+        self.assertEqual(report.revision_number, 2)
+
+        db.session.delete(report.site.assignments[0])
+        db.session.commit()
+        form = self.client.get(f"/employee/submitted-reports/{report.id}/edit")
+        self.assertEqual(form.status_code, 200)
+        self.assertIn(b"South Site - Example Customer (no longer assigned)", form.data)
+        self.assertEqual(self.edit(report, total_mandays="10").status_code, 302)
+        self.assertEqual(report.site_id, second_site.id)
 
     def test_replace_pdf_and_edit_metadata_retains_downloadable_history(self):
         self.login(self.employee)
@@ -182,6 +244,8 @@ class SubmittedReportTests(unittest.TestCase):
         ):
             self.assertEqual(self.client.get(url).status_code, 404)
         self.assertEqual(self.edit(first, total_mandays="1").status_code, 404)
+        db.session.add(SiteAssignment(employee=self.other, site=self.site))
+        db.session.commit()
         self.submit()
         second = SubmittedReport.query.filter_by(employee_id=self.other.id).one()
         self.assertEqual(self.client.get(

@@ -8,13 +8,14 @@
 <section class="panel-card">
   <p class="small text-secondary">These employee-level reports are separate from site-visit reports. Man-days are entered manually, not calculated from attendance.</p>
   <div class="table-responsive"><table class="table align-middle">
-    <thead><tr><th>Report</th>{% if current_user.is_admin %}<th>Employee</th>{% endif %}<th>Start date</th><th>End date</th><th>Total man-days</th><th>Last activity (IST)</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Report</th>{% if current_user.is_admin %}<th>Employee</th>{% endif %}<th>Site</th><th>Start date</th><th>End date</th><th>Total man-days</th><th>Last activity (IST)</th><th>Actions</th></tr></thead>
     <tbody>
       {% for report in pagination.items %}
       {% set version = report.current_version %}
       <tr>
         <td><a href="{{ url_for('main.submitted_report_detail', report_id=report.id) }}">Report #{{ report.id }}</a><div class="small text-secondary">Version {{ version.revision_number }}</div></td>
         {% if current_user.is_admin %}<td>{{ report.employee.name }}<div class="small text-secondary">{{ report.employee.email }}{{ " (inactive)" if not report.employee.is_active else "" }}</div></td>{% endif %}
+        <td>{{ report.site.site_name if report.site else "Not recorded" }}{% if report.site %}<div class="small text-secondary">{{ report.site.customer_name }}</div>{% endif %}</td>
         <td class="text-nowrap">{{ version.start_date.strftime("%d %b %Y") }}</td>
         <td class="text-nowrap">{{ version.end_date.strftime("%d %b %Y") }}</td>
         <td>{{ version.total_mandays }}</td>

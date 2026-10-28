@@ -11,7 +11,7 @@
       <label class="form-label" for="site-project">Project name</label>
       <select class="form-select mb-3" id="site-project" name="project_id">
         <option value="">No project selected</option>
-        {% for project in projects %}<option value="{{ project.id }}" {% if selected_project_id|string == project.id|string %}selected{% endif %}>{{ project.name }}</option>{% endfor %}
+        {% for project in projects %}<option value="{{ project.id }}" {% if selected_project_id|string == project.id|string %}selected{% endif %}>{{ project.project_number }} - {{ project.name }}</option>{% endfor %}
       </select>
       {% set header_site = values %}{% set header_suffix = 'assignment' %}{% include "_report_signoff_fields.html" %}{% set header_suffix = none %}
       <label class="form-label" for="site-address">Address</label><textarea class="form-control" id="site-address" name="address" rows="2" required>{{ values.address if values else '' }}</textarea>
@@ -37,7 +37,7 @@
           <label class="form-label" for="project-{{ site.id }}">Project name</label>
           <select class="form-select mb-2" id="project-{{ site.id }}" name="project_id">
             <option value="">No project selected</option>
-            {% for project in projects %}<option value="{{ project.id }}" {% if site.project_id == project.id %}selected{% endif %}>{{ project.name }}</option>{% endfor %}
+            {% for project in projects %}<option value="{{ project.id }}" {% if site.project_id == project.id %}selected{% endif %}>{{ project.project_number }} - {{ project.name }}</option>{% endfor %}
           </select>
           {% set header_site = site %}{% include "_report_signoff_fields.html" %}
           <button class="btn btn-sm btn-outline-primary">Save report header</button>

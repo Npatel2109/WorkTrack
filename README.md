@@ -78,6 +78,8 @@ For password reset emails, an administrator can open **Settings ? Email (passwor
 - Employee account creation, editing, password reset, and delete/deactivate behavior
 - Site assignment with WGS84 coordinates and configurable geofence radius (10–5,000 m; default 100 m)
 - **Sites** is a reusable catalog: create each site once without selecting an employee. **Edit site** changes its shared customer/address, map coordinates, radius and report-header details. Edits are blocked while any engineer has an active visit at that site. Historical attendance coordinate/distance snapshots remain unchanged; displayed site names/header details use the updated catalog entry.
+- Site addresses can be searched on the map with OpenStreetMap's Nominatim service; the selected pin fills latitude and longitude and can be moved manually. This free public service is subject to its usage policy and is not an unlimited, high-volume geocoding service. Google Maps can also be integrated, but typically requires a Google Maps Platform key and billing setup.
+- **Projects** have a required, unique project number and name. Existing projects are assigned a temporary `LEGACY-<id>` project number by migration; administrators can replace it.
 - **Assign sites** is a separate tab: select an active engineer, click **Load assignments**, tick any number of catalog sites and **Save assignments**. The same site can be assigned to multiple engineers without copying its details. Saving again does not duplicate memberships. Unticking removes future start access but preserves earlier visits, reports and membership history; an active visit must be stopped before its site can be unticked.
 - The engineer picker is a scrollable radio list with name/email search and wrapping text, avoiding clipped native dropdown options on desktop and Android.
 - Completed report review, PDF download, Excel export, selfie viewing, attendance history, and account access audit log
@@ -94,7 +96,7 @@ For password reset emails, an administrator can open **Settings ? Email (passwor
 - Stop with current GPS, or the last server-recorded location when GPS is unavailable; complete the activity/billing report now or later
 - Review completed visits and download site-activity Excel reports
 - Generated site-visit PDF downloads (individual and merged) are admin-only. Employee-uploaded PDFs in **Submitted reports** can be downloaded by their owner and admins.
-- **Submitted reports**: submit an employee-level PDF with start/end dates and manually entered whole-number man-days; edit the dates/man-days or replace the PDF later
+- **Submitted reports**: select an active assigned site, then submit an employee-level PDF with start/end dates and manually entered whole-number man-days; edit the site, dates/man-days or replace the PDF later
 
 ### Employee-submitted PDF reports
 
@@ -105,10 +107,11 @@ Apply the latest migration before restarting web workers:
 ```
 
 Both roles have a **Submitted reports** navigation tab, separate from generated
-site-visit reports. Employees select **Submit report**, enter an inclusive start/end
-date range and a positive whole-number **Total man-days**, then upload a PDF.
-No site selection or site assignment is required. Man-days are manual, not
-calculated from attendance or capped by the number of dates selected.
+site-visit reports. Employees select **Submit report**, choose one of their active
+assigned sites, enter an inclusive start/end date range and a positive whole-number
+**Total man-days**, then upload a PDF. Man-days are manual, not calculated from
+attendance or capped by the number of dates selected. Reports created before site
+selection was added remain marked as **Not recorded** until edited.
 
 Uploads must be readable, unencrypted PDFs with at least one page, up to 5 MB
 each (the configured request-size limit also applies). File contents are checked;
