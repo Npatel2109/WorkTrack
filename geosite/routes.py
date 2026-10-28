@@ -198,6 +198,23 @@ def _live_rows(today):
     rows = []
     on_leave = {leave.employee_id for leave in _leaves_today(today)}
     employees = User.query.filter_by(role="employee").order_by(User.name).all()
+    employee_ids = [employee.id for employee in employees]
+    work_statuses = {}
+    leave_statuses = {}
+    if employee_ids:
+        for item in DailyWorkStatus.query.filter(
+            DailyWorkStatus.employee_id.in_(employee_ids),
+            DailyWorkStatus.work_date == today,
+        ).options(joinedload(DailyWorkStatus.reviewed_by)).all():
+            work_statuses.setdefault(item.employee_id, []).append(item)
+        for item in LeaveRequest.query.filter(
+            LeaveRequest.employee_id.in_(employee_ids),
+            LeaveRequest.start_date <= today,
+            LeaveRequest.end_date >= today,
+        ).options(joinedload(LeaveRequest.reviewed_by)).order_by(
+            LeaveRequest.created_at.desc(), LeaveRequest.id.desc()
+        ).all():
+            leave_statuses.setdefault(item.employee_id, []).append(item)
     for employee in employees:
         active = (
             Attendance.query.filter_by(employee_id=employee.id, status="onsite")
@@ -233,6 +250,43 @@ def _live_rows(today):
             and last_completed.checkout_time
             and india_date(last_completed.checkout_time) == today
         )
+        daily_statuses = []
+        if active:
+            daily_statuses.append({
+                "label": "On Site", "status": "onsite", "detail": active.site.site_name,
+            })
+        if pending and pending.checkout_time and india_date(pending.checkout_time) == today:
+            daily_statuses.append({
+                "label": "Visit stopped - report pending",
+                "status": "report-pending",
+                "detail": pending.site.site_name,
+            })
+        if completed_today:
+            daily_statuses.append({
+                "label": "Site visit completed",
+                "status": "completed",
+                "detail": last_completed.site.site_name,
+            })
+        for item in work_statuses.get(employee.id, []):
+            detail = item.reason
+            if item.reviewed_by and item.reviewed_at:
+                detail += f" · Reviewed by {item.reviewed_by.name} at {format_ist(item.reviewed_at, '%H:%M IST')}"
+            daily_statuses.append({
+                "label": item.type_label, "status": item.status, "detail": detail,
+            })
+        for item in leave_statuses.get(employee.id, []):
+            detail = item.reason
+            if item.reviewed_by and item.reviewed_at:
+                detail += f" · Reviewed by {item.reviewed_by.name} at {format_ist(item.reviewed_at, '%H:%M IST')}"
+            daily_statuses.append({
+                "label": f"Leave - {item.period_label}",
+                "status": item.status,
+                "detail": detail,
+            })
+        if not daily_statuses:
+            daily_statuses.append({
+                "label": "No status submitted", "status": "offline", "detail": "",
+            })
         status = (
             "onsite"
             if active
@@ -253,6 +307,7 @@ def _live_rows(today):
                 "sites": [active.site] if active else [pending.site] if pending else assignments,
                 "attendance": active or pending,
                 "status": status,
+                "daily_statuses": daily_statuses,
             }
         )
     return rows
@@ -685,6 +740,7 @@ def live_status():
                 if row["attendance"]
                 else None,
                 "status": row["status"],
+                "daily_statuses": row["daily_statuses"],
             }
             for row in rows
         ],

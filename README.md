@@ -75,6 +75,7 @@ For password reset emails, an administrator can open **Settings ? Email (passwor
 ### Administrator
 
 - Dashboard with employee/site totals, onsite/completed status, a completed-visit chart, and assigned-site map
+- The live employee table also shows each employee's daily site, WFH/training/travel, leave request decision, or no-submission status. Past records remain available under Leave, Work confirmations and Attendance.
 - Employee account creation, editing, password reset, and delete/deactivate behavior
 - Site assignment with WGS84 coordinates and configurable geofence radius (10–5,000 m; default 100 m)
 - **Sites** is a reusable catalog: create each site once without selecting an employee. **Edit site** changes its shared customer/address, map coordinates, radius and report-header details. Edits are blocked while any engineer has an active visit at that site. Historical attendance coordinate/distance snapshots remain unchanged; displayed site names/header details use the updated catalog entry.

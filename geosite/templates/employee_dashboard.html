@@ -6,8 +6,8 @@
 <section class="panel-card mb-4">
   <div class="section-title"><div><p class="eyebrow">TIME OFF</p><h2>My leave - {{ month_start.strftime("%B %Y") }}</h2></div><a class="btn btn-outline-primary" href="{{ url_for('main.employee_leaves') }}">Apply / view all leave</a></div>
   <div class="row g-3 mb-3">
-    {% for key, label in [('approved', 'Approved'), ('pending', 'Pending'), ('rejected', 'Rejected'), ('automatic', 'Automatic leave')] %}
-    <div class="col-6 col-lg-3"><span class="stat-label">{{ label }} (days)</span><div class="stat-value" id="monthly-leave-{{ key }}">{{ "%g"|format(monthly_summary.totals[key]) }}</div></div>
+    {% for key, label in [('approved', 'Approved'), ('pending', 'Pending'), ('rejected', 'Rejected')] %}
+    <div class="col-6 col-lg-4"><span class="stat-label">{{ label }} (days)</span><div class="stat-value" id="monthly-leave-{{ key }}">{{ "%g"|format(monthly_summary.totals[key]) }}</div></div>
     {% endfor %}
   </div>
   <div class="row g-3 mb-3">

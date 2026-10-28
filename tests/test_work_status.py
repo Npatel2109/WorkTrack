@@ -124,7 +124,56 @@ class WorkStatusTests(unittest.TestCase):
         self.assertEqual(item.status, "approved")
         self.login(self.employee)
         page = self.client.get("/employee")
-        self.assertIn(b'id="monthly-leave-automatic">1', page.data)
+        self.assertNotIn(b"Automatic leave (days)", page.data)
+
+    def test_admin_dashboard_shows_each_employees_full_daily_status(self):
+        today = date(2026, 10, 27)
+        self.visit()
+        self.leave(today, status="rejected")
+        self.other_work_status = DailyWorkStatus(
+            employee_id=self.other.id, work_date=today, work_type="wfh",
+            reason="Working from home", status="rejected",
+            reviewed_by_id=self.admin.id, reviewed_at=self.now,
+        )
+        training = self.user("Training")
+        travelling = self.user("Travelling")
+        no_status = self.user("No Status")
+        db.session.add_all([
+            self.other_work_status,
+            DailyWorkStatus(
+                employee_id=training.id, work_date=today, work_type="training",
+                reason="Safety session", status="approved",
+            ),
+            DailyWorkStatus(
+                employee_id=travelling.id, work_date=today, work_type="travelling",
+                reason="Customer visit", status="pending",
+            ),
+        ])
+        db.session.commit()
+
+        self.login(self.admin)
+        page = self.client.get("/admin")
+        for label in (
+            b"Today's status", b"On Site", b"Leave - Full day", b"WFH",
+            b"Training", b"Travelling", b"No status submitted",
+        ):
+            self.assertIn(label, page.data)
+        data = self.client.get("/api/admin/live-status").json
+        employees = {row["name"]: row for row in data["employees"]}
+        self.assertEqual(
+            [(item["label"], item["status"]) for item in employees["Engineer"]["daily_statuses"]],
+            [("On Site", "onsite"), ("Leave - Full day", "rejected")],
+        )
+        self.assertTrue(any(
+            item["detail"].startswith("Working from home · Reviewed by Admin at ")
+            for item in employees["Other"]["daily_statuses"]
+        ))
+        self.assertEqual(employees["Training"]["daily_statuses"][0]["status"], "approved")
+        self.assertEqual(employees["Travelling"]["daily_statuses"][0]["status"], "pending")
+        self.assertEqual(
+            employees[no_status.name]["daily_statuses"][0]["label"],
+            "No status submitted",
+        )
 
     def test_types_reasons_duplicates_and_access_controls(self):
         self.assertEqual(self.submit().status_code, 200)  # Redirected to login.
@@ -202,8 +251,9 @@ class WorkStatusTests(unittest.TestCase):
         self.login(self.employee)
         page = self.client.get("/employee")
         self.assertIn(b"My leave - October 2026", page.data)
-        for status in ("approved", "pending", "rejected", "automatic"):
+        for status in ("approved", "pending", "rejected"):
             self.assertIn(f'id="monthly-leave-{status}"'.encode(), page.data)
+        self.assertNotIn(b"Automatic leave (days)", page.data)
         self.assertIn(b"Start Site", page.data)
         self.assertNotIn(b"Start site visit", page.data)
         self.visit()

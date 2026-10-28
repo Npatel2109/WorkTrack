@@ -166,6 +166,22 @@
             designation.className = "small text-secondary";
             designation.textContent = employee.designation;
             employeeCell.append(name, designation);
+            const dailyStatusCell = document.createElement("td");
+            for (const dailyStatus of employee.daily_statuses) {
+              const entry = document.createElement("div");
+              entry.className = "mb-1";
+              const dailyPill = document.createElement("span");
+              dailyPill.className = `status-pill ${dailyStatus.status}`;
+              dailyPill.textContent = dailyStatus.label;
+              entry.append(dailyPill);
+              if (dailyStatus.detail) {
+                const detail = document.createElement("div");
+                detail.className = "small text-secondary text-break";
+                detail.textContent = dailyStatus.detail;
+                entry.append(detail);
+              }
+              dailyStatusCell.append(entry);
+            }
             const siteCell = document.createElement("td");
             siteCell.textContent = employee.site || "No site assigned";
             if (employee.customer) {
@@ -182,13 +198,13 @@
             const label = employee.status.replaceAll("-", " ");
             pill.textContent = label[0].toUpperCase() + label.slice(1);
             state.append(pill);
-            row.append(employeeCell, siteCell, time, state);
+            row.append(employeeCell, dailyStatusCell, siteCell, time, state);
             fragment.append(row);
           }
           if (!data.employees.length) {
             const row = document.createElement("tr");
             const cell = document.createElement("td");
-            cell.colSpan = 4;
+            cell.colSpan = 5;
             cell.className = "empty-state";
             cell.textContent = "No employees have been added yet.";
             row.append(cell);
