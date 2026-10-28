@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from email_validator import EmailNotValidError, validate_email
+from werkzeug.utils import secure_filename
 from flask import (
     Blueprint,
     abort,
@@ -1209,8 +1210,8 @@ def employee_referrals():
         candidate_name = request.form.get("candidate_name", "").strip()
         candidate_email = request.form.get("candidate_email", "").strip()
         candidate_mobile = request.form.get("candidate_mobile", "").strip()
-        position = request.form.get("position", "").strip()
         notes = request.form.get("notes", "").strip()
+        resume = request.files.get("resume")
         try:
             validate_email(candidate_email)
         except EmailNotValidError:
@@ -1219,10 +1220,29 @@ def employee_referrals():
         if not candidate_name or len(candidate_name) > 120:
             flash("Enter the candidate name.", "danger")
             return redirect(url_for("main.employee_referrals"))
+        allowed_resume_extensions = {".pdf", ".doc", ".docx"}
+        original_resume_name = secure_filename(resume.filename or "") if resume else ""
+        resume_ext = Path(original_resume_name).suffix.lower()
+        if not resume or not resume.filename or resume_ext not in allowed_resume_extensions:
+            flash("Upload a PDF, DOC, or DOCX resume.", "danger")
+            return redirect(url_for("main.employee_referrals"))
+        resume.seek(0, os.SEEK_END)
+        resume_size = resume.tell()
+        resume.seek(0)
+        if resume_size == 0 or resume_size > 5 * 1024 * 1024:
+            flash("Resume must be non-empty and no larger than 5 MB.", "danger")
+            return redirect(url_for("main.employee_referrals"))
+        resume_folder = Path(current_app.config["UPLOAD_FOLDER"]) / "referral-resumes"
+        resume_folder.mkdir(parents=True, exist_ok=True)
+        stored_resume_name = f"{uuid.uuid4().hex}{resume_ext}"
+        resume_path = resume_folder / stored_resume_name
+        resume.save(resume_path)
         referral = CandidateReferral(
             employee_id=current_user.id, candidate_name=candidate_name,
             candidate_email=candidate_email, candidate_mobile=candidate_mobile,
-            position=position, notes=notes,
+            resume_filename=stored_resume_name,
+            resume_original_filename=original_resume_name,
+            notes=notes,
         )
         db.session.add(referral)
         db.session.flush()
@@ -1233,13 +1253,38 @@ def employee_referrals():
         if recipient:
             try:
                 send_email(current_app, recipient, "New candidate referral",
-                            f"{current_user.name} referred {candidate_name}.\nEmail: {candidate_email}\nMobile: {candidate_mobile or '-'}\nPosition: {position or '-'}\nNotes: {notes or '-'}")
+                            f"{current_user.name} referred {candidate_name}.\nEmail: {candidate_email}\nMobile: {candidate_mobile or '-'}\nNotes: {notes or '-'}",
+                            attachments=[(original_resume_name, resume_path)])
             except (OSError, RuntimeError, smtplib.SMTPException) as error:
                 current_app.logger.warning("Referral email failed: %r", error)
         flash("Candidate referred successfully.", "success")
         return redirect(url_for("main.employee_referrals"))
     referrals = CandidateReferral.query.filter_by(employee_id=current_user.id).order_by(CandidateReferral.created_at.desc()).all()
     return render_template("candidate_referrals.html", referrals=referrals)
+
+
+@bp.route("/admin/referrals")
+@admin_required
+def admin_referrals():
+    referrals = CandidateReferral.query.order_by(CandidateReferral.created_at.desc()).all()
+    return render_template("admin_referrals.html", referrals=referrals)
+
+
+@bp.route("/admin/referrals/<int:referral_id>/resume")
+@login_required
+def referral_resume(referral_id):
+    referral = db.session.get(CandidateReferral, referral_id)
+    if not referral:
+        abort(404)
+    if not current_user.is_admin and referral.employee_id != current_user.id:
+        abort(403)
+    if not referral.resume_filename:
+        abort(404)
+    path = Path(current_app.config["UPLOAD_FOLDER"])
+    resume_path = path / "referral-resumes" / referral.resume_filename
+    if not resume_path.is_file():
+        abort(404)
+    return send_file(resume_path, as_attachment=True, download_name=referral.resume_original_filename)
 
 
 @bp.route("/employee/work-status", methods=["POST"])

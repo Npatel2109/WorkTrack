@@ -4,21 +4,21 @@
 <div class="page-heading"><div><p class="eyebrow">EMPLOYEE REFERRALS</p><h1>Refer a candidate</h1></div></div>
 <section class="panel-card mb-4">
   <p class="mb-3 fw-semibold">Referral policy {% set info_text = "If your referred candidate completes six months, you receive INR 2,000 with each monthly salary for five months, totaling INR 10,000." %}{% include "_info.html" %}</p>
-  <form method="post">
+  <form method="post" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="row g-3">
       <div class="col-md-6"><label class="form-label" for="candidate-name">Candidate name *</label><input class="form-control" id="candidate-name" name="candidate_name" maxlength="120" required></div>
       <div class="col-md-6"><label class="form-label" for="candidate-email">Candidate email *</label><input class="form-control" id="candidate-email" name="candidate_email" type="email" maxlength="255" required></div>
       <div class="col-md-6"><label class="form-label" for="candidate-mobile">Candidate mobile</label><input class="form-control" id="candidate-mobile" name="candidate_mobile" maxlength="40"></div>
-      <div class="col-md-6"><label class="form-label" for="candidate-position">Position</label><input class="form-control" id="candidate-position" name="position" maxlength="120"></div>
+      <div class="col-md-6"><label class="form-label" for="candidate-resume">Resume *</label><input class="form-control" id="candidate-resume" name="resume" type="file" accept=".pdf,.doc,.docx" required></div>
       <div class="col-12"><label class="form-label" for="candidate-notes">Notes</label><textarea class="form-control" id="candidate-notes" name="notes" rows="3" maxlength="2000"></textarea></div>
     </div>
     <button class="btn btn-primary mt-3">Submit referral</button>
   </form>
 </section>
 <section class="panel-card"><div class="section-title"><div><p class="eyebrow">MY REFERRALS</p><h2>Submitted candidates</h2></div></div>
-  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Candidate</th><th>Position</th><th>Email / mobile</th><th>Submitted</th><th>Status</th></tr></thead><tbody>
-    {% for referral in referrals %}<tr><td>{{ referral.candidate_name }}</td><td>{{ referral.position or "—" }}</td><td>{{ referral.candidate_email }}{% if referral.candidate_mobile %}<div class="small text-secondary">{{ referral.candidate_mobile }}</div>{% endif %}</td><td>{{ referral.created_at|ist }}</td><td><span class="status-pill">{{ referral.status|title }}</span></td></tr>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Candidate</th><th>Email / mobile</th><th>Resume</th><th>Submitted</th><th>Status</th></tr></thead><tbody>
+    {% for referral in referrals %}<tr><td>{{ referral.candidate_name }}</td><td>{{ referral.candidate_email }}{% if referral.candidate_mobile %}<div class="small text-secondary">{{ referral.candidate_mobile }}</div>{% endif %}</td><td>{% if referral.resume_filename %}<a href="{{ url_for('main.referral_resume', referral_id=referral.id) }}">{{ referral.resume_original_filename }}</a>{% else %}—{% endif %}</td><td>{{ referral.created_at|ist }}</td><td><span class="status-pill">{{ referral.status|title }}</span></td></tr>
     {% else %}<tr><td colspan="5" class="empty-state">No candidates referred yet.</td></tr>{% endfor %}
   </tbody></table></div>
 </section>

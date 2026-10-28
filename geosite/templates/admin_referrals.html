@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Candidate referrals{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">ADMIN</p><h1>Candidate referrals</h1></div></div>
+<section class="panel-card">
+  <div class="table-responsive"><table class="table align-middle">
+    <thead><tr><th>Employee</th><th>Candidate</th><th>Email / mobile</th><th>Resume</th><th>Notes</th><th>Submitted</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for referral in referrals %}
+      <tr><td>{{ referral.employee.name }}</td><td>{{ referral.candidate_name }}</td><td>{{ referral.candidate_email }}{% if referral.candidate_mobile %}<div class="small text-secondary">{{ referral.candidate_mobile }}</div>{% endif %}</td><td>{% if referral.resume_filename %}<a href="{{ url_for('main.referral_resume', referral_id=referral.id) }}">{{ referral.resume_original_filename }}</a>{% else %}—{% endif %}</td><td>{{ referral.notes or "—" }}</td><td>{{ referral.created_at|ist }}</td><td><span class="status-pill">{{ referral.status|title }}</span></td></tr>
+      {% else %}<tr><td colspan="7" class="empty-state">No candidate referrals submitted.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}

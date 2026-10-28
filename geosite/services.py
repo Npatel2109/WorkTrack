@@ -198,7 +198,7 @@ def send_password_reset_email(app, recipient, reset_url):
     )
 
 
-def send_email(app, recipient, subject, body):
+def send_email(app, recipient, subject, body, attachments=None):
     config = mail_settings(app)
     if not config["server"] or not config["sender"]:
         raise RuntimeError("Password reset email is not configured.")
@@ -207,6 +207,15 @@ def send_email(app, recipient, subject, body):
     message["From"] = config["sender"]
     message["To"] = recipient
     message.set_content(body)
+    for attachment in attachments or []:
+        filename, path = attachment
+        data = Path(path).read_bytes()
+        maintype, subtype = ("application", "octet-stream")
+        import mimetypes
+        guessed = mimetypes.guess_type(filename)[0]
+        if guessed:
+            maintype, subtype = guessed.split("/", 1)
+        message.add_attachment(data, maintype=maintype, subtype=subtype, filename=filename)
     with (
         smtplib.SMTP_SSL(config["server"], config["port"], timeout=15)
         if config["security"] == "ssl"
