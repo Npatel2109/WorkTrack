@@ -34,7 +34,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from .extensions import db
 from .attendance import daily_cutoff, stop_attendance
 from .timeutils import INDIA_TIME, format_ist, india_date
-from .models import AppSettings, AssignedSite, Attendance, AttendancePolicy, AuditLog, DailyWorkStatus, Invoice, LeaveAllowanceAccount, LeaveRequest, MonthlyLeaveEntitlement, Project, REPORT_COMPANY_NAME, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
+from .models import AppSettings, AssignedSite, Attendance, AttendancePolicy, AuditLog, CandidateReferral, DailyWorkStatus, Invoice, LeaveAllowanceAccount, LeaveRequest, MonthlyLeaveEntitlement, Project, PurchaseOrder, REPORT_COMPANY_NAME, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
 from .work_status import approved_leave_today, attendance_summary, leave_overlap, month_bounds, monthly_leave_balance
 from .services import (
     generate_invoice_pdf,
@@ -73,6 +73,39 @@ def employee_required(view):
         return view(*args, **kwargs)
 
     return wrapped
+
+
+def _attendance_hours(visit, now=None):
+    if not visit.checkin_time:
+        return 0
+
+    def normalized(value):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    start = normalized(visit.checkin_time)
+    end = normalized(visit.checkout_time or now or utcnow())
+    return max(0, (end - start).total_seconds() / 3600)
+
+
+def _format_hours(hours):
+    total_minutes = max(0, round(hours * 60))
+    return f"{total_minutes // 60}h {total_minutes % 60:02d}m"
+
+
+def _used_po_mandays(po):
+    start = datetime.combine(po.start_date, datetime.min.time(), tzinfo=INDIA_TIME)
+    end = datetime.combine(po.end_date + timedelta(days=1), datetime.min.time(), tzinfo=INDIA_TIME)
+    visits = Attendance.query.filter(
+        Attendance.employee_id == po.employee_id,
+        Attendance.site_id == po.site_id,
+        Attendance.checkin_time >= start.astimezone(timezone.utc),
+        Attendance.checkin_time < end.astimezone(timezone.utc),
+        Attendance.checkout_time.isnot(None),
+        Attendance.status.in_(("completed", "report_pending")),
+    ).all()
+    return len({india_date(visit.checkin_time).isoformat() for visit in visits})
 
 
 def _active_attendance():
@@ -306,6 +339,7 @@ def _live_rows(today):
                 "site": site,
                 "sites": [active.site] if active else [pending.site] if pending else assignments,
                 "attendance": active or pending,
+                "onsite_hours": _format_hours(_attendance_hours(active or pending)) if (active or pending) else "—",
                 "status": status,
                 "daily_statuses": daily_statuses,
             }
@@ -411,6 +445,16 @@ def _save_mail_settings(settings):
     settings.mail_security = security
     settings.mail_username = username
     settings.mail_sender = sender
+    referral_email = form.get("referral_notification_email", "").strip()
+    po_email = form.get("po_notification_email", "").strip()
+    for label, value in (("Referral", referral_email), ("PO man-day", po_email)):
+        if value:
+            try:
+                value = validate_email(value, check_deliverability=False).normalized
+            except EmailNotValidError:
+                raise ValueError(f"Enter a valid {label} notification email address.") from None
+    settings.referral_notification_email = referral_email
+    settings.po_notification_email = po_email
     if form.get("clear_mail_password") == "yes":
         settings.mail_password = ""
     elif password:
@@ -1136,6 +1180,8 @@ def employee_dashboard():
         .limit(10)
         .all()
     )
+    for visit in reports:
+        visit.duration_label = _format_hours(_attendance_hours(visit))
     return render_template(
         "employee_dashboard.html",
         sites=AssignedSite.query.filter_by(is_active=True).filter(
@@ -1154,6 +1200,46 @@ def employee_dashboard():
         ).order_by(LeaveRequest.id.desc()).all(),
         leave_balance=monthly_leave_balance(current_user, start),
     )
+
+
+@bp.route("/employee/referrals", methods=["GET", "POST"])
+@employee_required
+def employee_referrals():
+    if request.method == "POST":
+        candidate_name = request.form.get("candidate_name", "").strip()
+        candidate_email = request.form.get("candidate_email", "").strip()
+        candidate_mobile = request.form.get("candidate_mobile", "").strip()
+        position = request.form.get("position", "").strip()
+        notes = request.form.get("notes", "").strip()
+        try:
+            validate_email(candidate_email)
+        except EmailNotValidError:
+            flash("Enter a valid candidate email address.", "danger")
+            return redirect(url_for("main.employee_referrals"))
+        if not candidate_name or len(candidate_name) > 120:
+            flash("Enter the candidate name.", "danger")
+            return redirect(url_for("main.employee_referrals"))
+        referral = CandidateReferral(
+            employee_id=current_user.id, candidate_name=candidate_name,
+            candidate_email=candidate_email, candidate_mobile=candidate_mobile,
+            position=position, notes=notes,
+        )
+        db.session.add(referral)
+        db.session.flush()
+        write_audit(current_user, "candidate_referred", candidate_name)
+        settings = db.session.get(AppSettings, 1)
+        recipient = settings.referral_notification_email if settings else ""
+        db.session.commit()
+        if recipient:
+            try:
+                send_email(current_app, recipient, "New candidate referral",
+                            f"{current_user.name} referred {candidate_name}.\nEmail: {candidate_email}\nMobile: {candidate_mobile or '-'}\nPosition: {position or '-'}\nNotes: {notes or '-'}")
+            except (OSError, RuntimeError, smtplib.SMTPException) as error:
+                current_app.logger.warning("Referral email failed: %r", error)
+        flash("Candidate referred successfully.", "success")
+        return redirect(url_for("main.employee_referrals"))
+    referrals = CandidateReferral.query.filter_by(employee_id=current_user.id).order_by(CandidateReferral.created_at.desc()).all()
+    return render_template("candidate_referrals.html", referrals=referrals)
 
 
 @bp.route("/employee/work-status", methods=["POST"])
@@ -2159,6 +2245,38 @@ def download_pdf(attendance_id):
 @bp.route("/admin/invoices", methods=["GET", "POST"])
 @admin_required
 def invoices():
+    if request.method == "POST" and request.form.get("form_action") == "create_po":
+        try:
+            po_number = request.form.get("po_number", "").strip()
+            customer_name = request.form.get("po_customer_name", "").strip()
+            employee_id = int(request.form.get("po_employee_id", ""))
+            site_id = int(request.form.get("po_site_id", ""))
+            start_date = date.fromisoformat(request.form.get("po_start_date", ""))
+            end_date = date.fromisoformat(request.form.get("po_end_date", ""))
+            total_mandays = int(request.form.get("total_mandays", "0"))
+            if not po_number or not customer_name:
+                raise ValueError("Enter the PO number and customer name.")
+            if end_date < start_date:
+                raise ValueError("PO end date must be on or after the start date.")
+            if not 0 <= total_mandays <= 2147483647:
+                raise ValueError("Man-days must be a whole number of zero or more.")
+            if PurchaseOrder.query.filter_by(po_number=po_number).first():
+                raise ValueError("That PO number already exists.")
+            site = AssignedSite.query.filter_by(id=site_id, is_active=True).first()
+            employee = User.query.filter_by(id=employee_id, role="employee", is_active=True).first()
+            if not site or not employee or not SiteAssignment.query.filter_by(employee_id=employee_id, site_id=site_id, is_active=True).first():
+                raise ValueError("Select an active employee assigned to the selected site.")
+        except (TypeError, ValueError) as error:
+            flash(str(error) or "Complete all PO fields.", "danger")
+        else:
+            po = PurchaseOrder(po_number=po_number, customer_name=customer_name, employee_id=employee_id,
+                               site_id=site_id, start_date=start_date, end_date=end_date,
+                               total_mandays=total_mandays)
+            db.session.add(po)
+            write_audit(current_user, "purchase_order_created", f"{po_number}: {total_mandays} man-days")
+            db.session.commit()
+            flash(f"PO {po_number} saved.", "success")
+        return redirect(url_for("main.invoices"))
     if request.method == "POST":
         try:
             site_id = int(request.form.get("site_id", ""))
@@ -2227,7 +2345,45 @@ def invoices():
         SiteAssignment.is_active.is_(True), AssignedSite.is_active.is_(True), User.is_active.is_(True),
     ).order_by(User.name, AssignedSite.site_name).all()
     invoice_records = Invoice.query.order_by(Invoice.created_at.desc()).limit(500).all()
-    return render_template("invoices.html", assignments=site_options, invoices=invoice_records)
+    purchase_orders = PurchaseOrder.query.order_by(PurchaseOrder.created_at.desc()).all()
+    settings = db.session.get(AppSettings, 1)
+    changed = False
+    for po in purchase_orders:
+        used = _used_po_mandays(po)
+        if po.used_mandays != used:
+            po.used_mandays = used
+            changed = True
+        generated = Invoice.query.filter_by(po_number=po.po_number).first() is not None
+        if po.invoice_generated != generated:
+            po.invoice_generated = generated
+            changed = True
+        if po.total_mandays > 0 and used >= po.total_mandays and not po.completion_email_sent and settings and settings.po_notification_email:
+            try:
+                send_email(current_app, settings.po_notification_email, f"PO {po.po_number} man-days completed",
+                           f"PO {po.po_number} for {po.customer_name} has used {used} of {po.total_mandays} allocated man-days. Please review pending invoice and payment status.")
+                po.completion_email_sent = True
+                changed = True
+            except (OSError, RuntimeError, smtplib.SMTPException) as error:
+                current_app.logger.warning("PO completion email failed: %r", error)
+    if changed:
+        db.session.commit()
+    return render_template("invoices.html", assignments=site_options, invoices=invoice_records,
+                           purchase_orders=purchase_orders)
+
+
+@bp.route("/admin/purchase-orders/<int:po_id>/status", methods=["POST"])
+@admin_required
+def update_purchase_order_status(po_id):
+    po = db.session.get(PurchaseOrder, po_id)
+    if not po:
+        abort(404)
+    if "invoice_generated" in request.form:
+        po.invoice_generated = request.form.get("invoice_generated") == "yes"
+    if "money_received" in request.form:
+        po.money_received = request.form.get("money_received") == "yes"
+    db.session.commit()
+    flash(f"PO {po.po_number} status updated.", "success")
+    return redirect(url_for("main.invoices"))
 
 
 @bp.route("/admin/invoices/<int:invoice_id>/pdf")

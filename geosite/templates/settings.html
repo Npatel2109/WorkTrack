@@ -62,6 +62,8 @@
       <div class="col-md-6"><label class="form-label" for="mail-password">SMTP password</label>
         <input class="form-control" id="mail-password" name="mail_password" type="password" maxlength="500" autocomplete="new-password" placeholder="{{ 'Saved - leave blank to keep' if settings and settings.mail_password else 'Mailbox password' }}">
         {% if settings and settings.mail_password %}<label class="small mt-1"><input type="checkbox" name="clear_mail_password" value="yes"> Remove saved password</label>{% endif %}</div>
+      <div class="col-md-6"><label class="form-label" for="referral-notification-email">Candidate referral notification email {% set info_text = "Receives an email whenever an employee submits a candidate referral." %}{% include "_info.html" %}</label><input class="form-control" id="referral-notification-email" name="referral_notification_email" type="email" value="{{ settings.referral_notification_email if settings else '' }}"></div>
+      <div class="col-md-6"><label class="form-label" for="po-notification-email">PO man-day reminder email {% set info_text = "Receives an alert when a purchase order reaches or exceeds its configured man-day limit." %}{% include "_info.html" %}</label><input class="form-control" id="po-notification-email" name="po_notification_email" type="email" value="{{ settings.po_notification_email if settings else '' }}"></div>
     </div>
     <p class="form-text mt-2">The password is stored in the app database and is never shown again. Only administrators can change these settings.</p>
     <div class="d-flex flex-wrap gap-2">

@@ -1,7 +1,27 @@
 {% extends "base.html" %}
 {% block title %}Invoices{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">BILLING</p><h1>Invoices</h1><p class="text-secondary mb-0">Create invoices using billable days multiplied by a daily rate.</p></div></div>
+<div class="page-heading"><div><p class="eyebrow">BILLING</p><h1>Invoices</h1><p class="text-secondary mb-0">Generate invoice {% set info_text = "Create an invoice by multiplying billable site days by the approved daily rate." %}{% include "_info.html" %}</p></div></div>
+<section class="panel-card mb-4"><div class="section-title"><div><p class="eyebrow">PO MAN-DAYS</p><h2>Add purchase order {% set info_text = "Record the PO allocation and dates. Used man-days are calculated automatically from completed employee visits at the selected site." %}{% include "_info.html" %}</h2></div></div>
+  <form method="post" class="row g-3"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="form_action" value="create_po">
+    <div class="col-md-3"><label class="form-label" for="po-number">PO number *</label><input class="form-control" id="po-number" name="po_number" maxlength="120" required></div>
+    <div class="col-md-3"><label class="form-label" for="po-customer">Customer *</label><input class="form-control" id="po-customer" name="po_customer_name" maxlength="160" required></div>
+    <div class="col-md-4"><label class="form-label" for="po-assignment">Employee / site *</label><select class="form-select" id="po-assignment" name="po_assignment" required><option value="">Select employee / site</option>{% for assignment in assignments %}<option value="{{ assignment.employee_id }}:{{ assignment.site_id }}">{{ assignment.employee.name }} · {{ assignment.site.site_name }}</option>{% endfor %}</select></div>
+    <input type="hidden" id="po-employee-id" name="po_employee_id"><input type="hidden" id="po-site-id" name="po_site_id">
+    <div class="col-md-2"><label class="form-label" for="po-mandays">Total man-days {% set info_text = "Enter the PO man-day limit. Zero means no limit is configured." %}{% include "_info.html" %}</label><input class="form-control" id="po-mandays" name="total_mandays" type="number" min="0" step="1" value="0"></div>
+    <div class="col-md-3"><label class="form-label" for="po-start">Start date *</label><input class="form-control" id="po-start" name="po_start_date" type="date" required></div>
+    <div class="col-md-3"><label class="form-label" for="po-end">End date *</label><input class="form-control" id="po-end" name="po_end_date" type="date" required></div>
+    <div class="col-md-3 align-self-end"><button class="btn btn-primary">Save PO</button></div>
+  </form>
+</section>
+<section class="panel-card mb-4"><div class="section-title"><div><p class="eyebrow">PO STATUS</p><h2>Man-days and billing {% set info_text = "Used man-days come from completed check-ins at the PO employee and site. Pending man-days equal total allocation minus used man-days." %}{% include "_info.html" %}</h2></div></div>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>PO / customer</th><th>Employee / site</th><th>Dates</th><th>Man-days</th><th>Invoice</th><th>Payment</th></tr></thead><tbody>
+  {% for po in purchase_orders %}<tr><td><strong>{{ po.po_number }}</strong><div class="small text-secondary">{{ po.customer_name }}</div></td><td>{{ po.employee.name }}<div class="small text-secondary">{{ po.site.site_name }}</div></td><td>{{ po.start_date }} – {{ po.end_date }}</td><td>{{ po.used_mandays }} used / {{ po.total_mandays }} total<div class="small text-secondary">{% if po.total_mandays %}{{ [po.total_mandays - po.used_mandays, 0]|max }} pending{% else %}No limit set{% endif %}</div></td>
+    <td><form method="post" action="{{ url_for('main.update_purchase_order_status', po_id=po.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label class="small"><input type="checkbox" name="invoice_generated" value="yes" {% if po.invoice_generated %}checked{% endif %} onchange="this.form.submit()"> Generated</label></form></td>
+    <td><form method="post" action="{{ url_for('main.update_purchase_order_status', po_id=po.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="invoice_generated" value="{{ 'yes' if po.invoice_generated else 'no' }}"><label class="small"><input type="checkbox" name="money_received" value="yes" {% if po.money_received %}checked{% endif %} onchange="this.form.submit()"> Received</label></form></td></tr>
+  {% else %}<tr><td colspan="6" class="empty-state">No purchase orders added yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
 <div class="row g-4">
   <div class="col-xl-5"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">NEW INVOICE</p><h2>Invoice details</h2></div></div>
     {% if not assignments %}<div class="alert alert-info">Assign an active site to an engineer before creating an invoice.</div>{% endif %}
@@ -21,7 +41,7 @@
         <div class="col-6"><label class="form-label" for="currency">Currency *</label><select class="form-select" id="currency" name="currency" required>{% for code in ["INR","USD","EUR","GBP","AED"] %}<option value="{{ code }}" {% if code == "INR" %}selected{% endif %}>{{ code }}</option>{% endfor %}</select></div>
         <div class="col-6"><label class="form-label">Total</label><div class="invoice-total" id="invoice-total">INR 0.00</div></div>
       </div>
-      <p class="form-text mt-2">Billable days are prefilled as inclusive calendar days and can be adjusted within the date range. The server recalculates the total.</p>
+      <p class="form-text mt-2">Billing calculation {% set info_text = "Billable days are prefilled as inclusive calendar days and can be adjusted within the date range. The server recalculates the total." %}{% include "_info.html" %}</p>
       <button class="btn btn-primary w-100 mt-2" {% if not assignments %}disabled{% endif %}>Generate invoice</button>
     </form>
   </section></div>
@@ -40,6 +60,12 @@
 {% block scripts %}
 <script>
 (() => {
+  const poAssignment = document.getElementById("po-assignment");
+  poAssignment.addEventListener("change", () => {
+    const [employeeId, siteId] = (poAssignment.value || ":").split(":");
+    document.getElementById("po-employee-id").value = employeeId || "";
+    document.getElementById("po-site-id").value = siteId || "";
+  });
   const site = document.getElementById("invoice-site");
   const customer = document.getElementById("invoice-customer");
   const start = document.getElementById("invoice-start");

@@ -29,12 +29,12 @@
     <section class="panel-card">
       <div class="section-title"><div><p class="eyebrow">LIVE ATTENDANCE</p><h2>Employee status</h2><p class="small text-secondary mb-0">Today's work, leave, and site status (IST). Refreshes every 15 seconds.</p></div><span class="small">History: <a href="{{ url_for('main.admin_leaves') }}">Leave</a> · <a href="{{ url_for('main.admin_work_status') }}">Work confirmations</a> · <a href="{{ url_for('main.attendance_history') }}">Attendance</a></span></div>
       <div class="table-responsive"><table class="table align-middle">
-        <thead><tr><th>Employee</th><th>Today's status</th><th>Assigned site</th><th>Check-in time (IST)</th><th>Live status</th></tr></thead>
+        <thead><tr><th>Employee</th><th>Today's status</th><th>Assigned site</th><th>Check-in time (IST)</th><th>On-site time {% set info_text = "Elapsed time from site check-in to check-out. Active visits continue updating until the employee checks out." %}{% include "_info.html" %}</th><th>Live status</th></tr></thead>
         <tbody id="live-status-body">{% for row in live_rows %}
           <tr><td><div class="fw-semibold">{{ row.employee.name }}</div><div class="small text-secondary">{{ row.employee.designation }}</div></td>
             <td>{% for item in row.daily_statuses %}<div class="mb-1"><span class="status-pill {{ item.status }}">{{ item.label }}</span>{% if item.detail %}<div class="small text-secondary text-break">{{ item.detail }}</div>{% endif %}</div>{% endfor %}</td>
             <td>{{ row.sites|map(attribute="site_name")|join(", ") if row.sites else "No site assigned" }}{% if row.sites %}<div class="small text-secondary">{{ row.sites|map(attribute="customer_name")|unique|join(", ") }}</div>{% endif %}</td>
-            <td>{{ row.attendance.checkin_time|ist("%H:%M IST") if row.attendance else "—" }}</td><td><span class="status-pill {{ row.status }}">{{ row.status|replace('-', ' ')|title }}</span></td>
+            <td>{{ row.attendance.checkin_time|ist("%H:%M IST") if row.attendance else "—" }}</td><td>{{ row.onsite_hours }}</td><td><span class="status-pill {{ row.status }}">{{ row.status|replace('-', ' ')|title }}</span></td>
           </tr>
         {% else %}<tr><td colspan="5" class="empty-state">No employees have been added yet.</td></tr>{% endfor %}</tbody>
       </table></div>

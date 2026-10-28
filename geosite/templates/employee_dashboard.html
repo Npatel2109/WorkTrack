@@ -15,8 +15,8 @@
     <div class="col-md-4"><span class="stat-label">Total leaves taken + absence</span><div class="fw-semibold" id="total-leaves-taken">{{ "%g days"|format(leave_balance.used) }}</div></div>
     <div class="col-md-4"><span class="stat-label">Remaining leaves</span><div class="fw-semibold" id="monthly-balance">{{ "%g days"|format(leave_balance.remaining) }}</div></div>
   </div>
-  <p class="small text-secondary">Current monthly credit: {{ "%g"|format(leave_balance.monthly_rate) }} days. Accrual starts in the joining month (joining date: {{ leave_balance.joining_date.strftime("%d %b %Y") }}). Unused leave carries forward every month and year without expiry. Approved leave through today and automatic absence reduce the balance. Future approved leave reserved: {{ "%g"|format(leave_balance.reserved) }} days; available after reservations: {{ "%g"|format(leave_balance.available) }} days. Pending/rejected requests do not reduce it. A negative balance means the allowance is exceeded. <a href="{{ url_for('main.employee_leaves') }}">View complete allowance history</a>.</p>
-  <p class="small text-secondary">Approved + automatic leave: <strong id="monthly-leave-total">{{ "%g"|format(monthly_summary.total_leave) }} days</strong>. Request totals include only dates within this month. Automatic leave applies after 23:59 IST, Monday-Saturday, when no site visit or approved work confirmation exists; approved leave is not counted twice. Pending/rejected work confirmations do not prevent automatic leave.</p>
+  <p class="small text-secondary">Leave balance details {% set info_text = "Current monthly credit is " ~ ("%g"|format(leave_balance.monthly_rate)) ~ " days; accrual starts in the joining month. Joining date: " ~ leave_balance.joining_date.strftime("%d %b %Y") ~ ". Leave carries forward without expiry. Approved leave and automatic absence reduce the balance. Reserved future approved leave: " ~ ("%g"|format(leave_balance.reserved)) ~ " days; available after reservations: " ~ ("%g"|format(leave_balance.available)) ~ " days. Pending and rejected requests do not reduce it." %}{% include "_info.html" %} <a href="{{ url_for('main.employee_leaves') }}">View complete allowance history</a>.</p>
+  <p class="small text-secondary">Approved + automatic leave: <strong id="monthly-leave-total">{{ "%g"|format(monthly_summary.total_leave) }} days</strong> {% set info_text = "Automatic leave applies after 23:59 IST from Monday to Saturday when no site visit or approved work confirmation exists. Approved leave is counted only once; pending or rejected confirmations do not prevent automatic leave." %}{% include "_info.html" %}</p>
   {% for leave in monthly_summary.leaves %}
   <div class="d-flex flex-wrap justify-content-between gap-2 py-2 border-bottom">
     <span>{{ leave.start_date.strftime("%d %b %Y") }} to {{ leave.end_date.strftime("%d %b %Y") }} <span class="text-secondary small">({{ leave.period_label }})</span></span>
@@ -44,10 +44,9 @@
 {% else %}<div class="col-12"><div class="panel-card empty-state py-5"><div class="empty-icon">⌖</div><h2>No site assigned yet</h2><p>Your administrator will assign your site location.</p></div></div>{% endfor %}</div>
 {% endif %}
 <section class="panel-card"><div class="section-title"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>My completed visits</h2></div><a href="{{ url_for('main.reports') }}">All reports</a></div>
-  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Site</th><th>Customer</th><th>Check-in (IST)</th><th>Completed (IST)</th></tr></thead>
-    <tbody>{% for attendance in reports %}<tr><td class="fw-semibold">{{ attendance.site.site_name }}</td><td>{{ attendance.site.customer_name }}</td><td>{{ attendance.checkin_time|ist }}</td><td>{{ attendance.checkout_time|ist }}</td></tr>
-    {% else %}<tr><td colspan="4" class="empty-state">Completed visits and reports will appear here.</td></tr>{% endfor %}</tbody>
-  </table></div>
+  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Site</th><th>Customer</th><th>Check-in (IST)</th><th>Completed (IST)</th><th>On-site time {% set info_text = "Total elapsed time from this site's check-in to check-out." %}{% include "_info.html" %}</th></tr></thead>
+      <tbody>{% for attendance in reports %}<tr><td class="fw-semibold">{{ attendance.site.site_name }}</td><td>{{ attendance.site.customer_name }}</td><td>{{ attendance.checkin_time|ist }}</td><td>{{ attendance.checkout_time|ist }}</td><td>{{ attendance.duration_label }}</td></tr>
+      {% else %}<tr><td colspan="5" class="empty-state">Completed visits and reports will appear here.</td></tr>{% endfor %}</tbody>  </table></div>
 </section>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='js/daily-status.js') }}"></script>{% endblock %}

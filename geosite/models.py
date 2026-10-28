@@ -57,6 +57,8 @@ class AppSettings(db.Model):
     mail_username = db.Column(db.String(255), nullable=False, default="", server_default="")
     mail_password = db.Column(db.String(500), nullable=False, default="", server_default="")
     mail_sender = db.Column(db.String(255), nullable=False, default="", server_default="")
+    referral_notification_email = db.Column(db.String(255), nullable=False, default="", server_default="")
+    po_notification_email = db.Column(db.String(255), nullable=False, default="", server_default="")
 
 
 class LeaveRequest(db.Model):
@@ -304,6 +306,39 @@ class SubmittedReportVersion(db.Model):
         db.CheckConstraint("end_date >= start_date", name="submitted_report_date_order"),
         db.CheckConstraint("total_mandays >= 1", name="submitted_report_positive_mandays"),
     )
+
+
+class CandidateReferral(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    candidate_name = db.Column(db.String(120), nullable=False)
+    candidate_email = db.Column(db.String(255), nullable=False)
+    candidate_mobile = db.Column(db.String(40), nullable=False, default="", server_default="")
+    position = db.Column(db.String(120), nullable=False, default="", server_default="")
+    notes = db.Column(db.Text, nullable=False, default="", server_default="")
+    status = db.Column(db.String(20), nullable=False, default="submitted", server_default="submitted")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    employee = db.relationship("User")
+
+
+class PurchaseOrder(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    po_number = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    customer_name = db.Column(db.String(160), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    site_id = db.Column(db.Integer, db.ForeignKey("assigned_sites.id"), nullable=False, index=True)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    total_mandays = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    used_mandays = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    invoice_generated = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    money_received = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    completion_email_sent = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    employee = db.relationship("User")
+    site = db.relationship("AssignedSite")
 
 
 class Invoice(db.Model):
