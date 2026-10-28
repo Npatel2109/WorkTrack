@@ -4,6 +4,22 @@
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
   let busy = false;
   let stopped = false;
+  const notificationKey = "worktrack-outside-site-last-notified";
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission().catch(() => {});
+  }
+  const notifyOutsideSite = (distance, radius) => {
+    const now = Date.now();
+    let last = Number(localStorage.getItem(notificationKey) || 0);
+    if (now - last < 30 * 60 * 1000) return;
+    const message = `You are outside the assigned site${distance != null ? ` by approximately ${Math.round(distance)} metres` : ""}. Reference radius: ${Math.round(radius || 0)} metres.`;
+    status.textContent = `WARNING: ${message}`;
+    status.className = "alert alert-danger small";
+    localStorage.setItem(notificationKey, String(now));
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification("Outside assigned site", { body: message, tag: "worktrack-outside-site" });
+    }
+  };
   const capture = () => {
     if (busy || stopped || document.hidden) return;
     if (!window.isSecureContext || !navigator.geolocation) {
@@ -25,7 +41,12 @@
           return;
         }
         if (!response.ok) throw new Error(result.error || "Location could not be saved.");
-        status.textContent = `Last location saved at ${new Date().toLocaleTimeString()}. Updates run every minute while this page is visible.`;
+        if (result.within_radius === false) {
+          notifyOutsideSite(result.distance, result.radius_m);
+        } else {
+          status.textContent = `Last location saved at ${new Date().toLocaleTimeString()}. Updates run every minute while this page is visible.`;
+          status.className = "alert alert-info small";
+        }
       } catch (error) {
         status.textContent = `Location update failed: ${error.message} The previous captured location is retained.`;
       } finally {

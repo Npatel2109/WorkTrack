@@ -28,11 +28,14 @@
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Location capture failed.");
-        feedback.className = "gps-feedback mt-4 success";
+        const outside = result.within_radius === false;
+        feedback.className = outside ? "gps-feedback mt-4 error" : "gps-feedback mt-4 success";
         const distance = result.distance == null ? "" : ` Distance from assigned site: ${Number(result.distance).toFixed(1)} m.`;
         feedback.textContent = verifyButton.dataset.flow === "checkout"
-          ? `Visit stopped. ${result.location_source === "last_known" ? "GPS unavailable; last captured location recorded." : result.location_source === "unavailable" ? "Location unavailable; this is recorded for the administrator." : "Stop location recorded."}${distance} Complete your report now or later.`
-          : `Location captured.${distance}${result.within_radius === false ? " Outside the reference radius; you can still continue." : ""}`;
+          ? `Visit stopped. ${result.location_source === "last_known" ? "GPS unavailable; last captured location recorded." : result.location_source === "unavailable" ? "Location unavailable; this is recorded for the administrator." : outside ? "WARNING: You are outside the assigned site's reference radius." : "Stop location recorded."}${distance} Complete your report now or later.`
+          : outside
+            ? `WARNING: Outside the assigned site's reference radius.${distance} You can still continue.`
+            : `Location captured.${distance}`;
         nextUrl = result.next;
         verifyButton.disabled = false;
         verifyButton.textContent = "Continue";

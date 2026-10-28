@@ -1872,9 +1872,12 @@ def verify_checkout(attendance_id):
     if not stop_attendance(attendance, utcnow(), coordinates=coordinates, reason=reason):
         return jsonify(error="This visit has already stopped. Refresh your dashboard."), 409
     db.session.commit()
+    distance = attendance.checkout_distance_m
+    radius = attendance.site_radius_m
     return jsonify(
         verified=True,
-        distance=round(attendance.checkout_distance_m, 1) if attendance.checkout_distance_m is not None else None,
+        distance=round(distance, 1) if distance is not None else None,
+        within_radius=(distance <= radius) if distance is not None and radius is not None else True,
         location_source=attendance.checkout_location_source,
         next=url_for("main.site_report_form", attendance_id=attendance.id),
     )
@@ -1894,7 +1897,11 @@ def capture_visit_location(attendance_id):
     if not changed:
         return jsonify(error="This visit has stopped.", active=False), 409
     db.session.commit()
-    return jsonify(recorded=True)
+    reference_lat = attendance.site_latitude if attendance.site_latitude is not None else attendance.site.latitude
+    reference_lon = attendance.site_longitude if attendance.site_longitude is not None else attendance.site.longitude
+    radius = attendance.site_radius_m if attendance.site_radius_m is not None else attendance.site.allowed_radius
+    distance = haversine_distance(reference_lat, reference_lon, latitude, longitude)
+    return jsonify(recorded=True, distance=round(distance, 1), within_radius=distance <= radius, radius_m=radius)
 
 
 def _visit_monitor_serializer():
