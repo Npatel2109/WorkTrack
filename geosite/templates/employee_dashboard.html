@@ -3,28 +3,6 @@
 {% block content %}
 <div class="page-heading"><div><p class="eyebrow">FIELD ENGINEER</p><h1>Hello, {{ current_user.name.split(' ')[0] }}</h1><p class="text-secondary mb-0">Your assigned sites, visit status, and recent reports.</p></div>{% if active_attendance %}<span class="status-pill onsite">Onsite now</span>{% endif %}</div>
 {% include "_today_status.html" %}
-<section class="panel-card mb-4">
-  <div class="section-title"><div><p class="eyebrow">TIME OFF</p><h2>My leave - {{ month_start.strftime("%B %Y") }}</h2></div><a class="btn btn-outline-primary" href="{{ url_for('main.employee_leaves') }}">Apply / view all leave</a></div>
-  <div class="row g-3 mb-3">
-    {% for key, label in [('approved', 'Approved'), ('pending', 'Pending'), ('rejected', 'Rejected')] %}
-    <div class="col-6 col-lg-4"><span class="stat-label">{{ label }} (days)</span><div class="stat-value" id="monthly-leave-{{ key }}">{{ "%g"|format(monthly_summary.totals[key]) }}</div></div>
-    {% endfor %}
-  </div>
-  <div class="row g-3 mb-3">
-    <div class="col-md-4"><span class="stat-label">Total leaves assigned (including carry-forward)</span><div class="fw-semibold" id="monthly-entitlement">{{ "%g days"|format(leave_balance.entitlement) }}</div></div>
-    <div class="col-md-4"><span class="stat-label">Total leaves taken + absence</span><div class="fw-semibold" id="total-leaves-taken">{{ "%g days"|format(leave_balance.used) }}</div></div>
-    <div class="col-md-4"><span class="stat-label">Remaining leaves</span><div class="fw-semibold" id="monthly-balance">{{ "%g days"|format(leave_balance.remaining) }}</div></div>
-  </div>
-  <p class="small text-secondary">Leave balance details {% set info_text = "Current monthly credit is " ~ ("%g"|format(leave_balance.monthly_rate)) ~ " days; accrual starts in the joining month. Joining date: " ~ leave_balance.joining_date.strftime("%d %b %Y") ~ ". Leave carries forward without expiry. Approved leave and automatic absence reduce the balance. Reserved future approved leave: " ~ ("%g"|format(leave_balance.reserved)) ~ " days; available after reservations: " ~ ("%g"|format(leave_balance.available)) ~ " days. Pending and rejected requests do not reduce it." %}{% include "_info.html" %} <a href="{{ url_for('main.employee_leaves') }}">View complete allowance history</a>.</p>
-  <p class="small text-secondary">Approved + automatic leave: <strong id="monthly-leave-total">{{ "%g"|format(monthly_summary.total_leave) }} days</strong> {% set info_text = "Automatic leave applies after 23:59 IST from Monday to Saturday when no site visit or approved work confirmation exists. Approved leave is counted only once; pending or rejected confirmations do not prevent automatic leave." %}{% include "_info.html" %}</p>
-  {% for leave in monthly_summary.leaves %}
-  <div class="d-flex flex-wrap justify-content-between gap-2 py-2 border-bottom">
-    <span>{{ leave.start_date.strftime("%d %b %Y") }} to {{ leave.end_date.strftime("%d %b %Y") }} <span class="text-secondary small">({{ leave.period_label }})</span></span>
-    <span class="status-pill {{ leave.status }}">{{ leave.status|title }}</span>
-  </div>
-  {% else %}<p class="text-secondary mb-0">No leave requests this month.</p>{% endfor %}
-  {% for item in monthly_summary.automatic %}<div class="d-flex flex-wrap justify-content-between gap-2 py-2 border-bottom"><span>{{ item.date.strftime("%d %b %Y") }} ({{ "%g"|format(item.days) }} day)</span><span class="status-pill rejected">Automatic leave</span></div>{% endfor %}
-</section>
 {% if pending_visits %}
 <section class="panel-card mb-4">
   <div class="section-title"><div><p class="eyebrow">REPORTS TO COMPLETE</p><h2>Stopped visits - report pending</h2></div></div>
