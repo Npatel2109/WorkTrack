@@ -2,6 +2,8 @@ import base64
 import io
 import tempfile
 import unittest
+from pathlib import Path
+from zipfile import ZipFile
 from unittest.mock import patch
 from urllib.parse import urlparse
 from datetime import date, datetime, timedelta, timezone
@@ -9,6 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 from PIL import Image
 from pypdf import PdfReader
 from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
 
 from geosite import create_app
 from geosite.attendance import as_utc, close_overdue_visits, daily_cutoff
@@ -146,24 +149,86 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(sheet["E12"].value, "Sick Leave")
         self.assertEqual(sheet["E13"].value, "No activity recorded")
         self.assertEqual(sheet["E17"].value, "Sunday")
-        self.assertEqual(sheet["K24"].value, 1)
-        self.assertEqual(sheet["A18"].value, "REMARKS")
-        self.assertEqual([sheet.cell(r, 1).value for r in range(19, 24)], [1, 2, 3, 4, 5])
-        self.assertEqual(sheet["C19"].value, "First remark")
-        self.assertEqual(sheet["C20"].value, "=literal remark")
-        self.assertEqual(sheet["C20"].data_type, "s")
-        self.assertIsNone(sheet["C21"].value)
-        self.assertEqual(sheet["I25"].value, f"M/S {REPORT_COMPANY_NAME}")
-        self.assertIn("Commissioning Manager : Commissioning Lead", sheet["A26"].value)
-        self.assertIn("Customer representative:", sheet["A26"].value)
-        self.assertIn("Project Manager : Project Lead", sheet["E26"].value)
-        self.assertIn("Engineer : Engineer", sheet["I26"].value)
-        for merge in ("A26:D30", "E26:H30", "I26:L30", "C19:L19"):
+        self.assertEqual(sheet["K31"].value, 1)
+        self.assertEqual(sheet["A25"].value, "REMARKS")
+        self.assertEqual([sheet.cell(r, 1).value for r in range(26, 31)], [1, 2, 3, 4, 5])
+        self.assertEqual(sheet["C26"].value, "First remark")
+        self.assertEqual(sheet["C27"].value, "=literal remark")
+        self.assertEqual(sheet["C27"].data_type, "s")
+        self.assertIn(sheet["C28"].value, (None, ""))
+        self.assertEqual(sheet["I32"].value, f"M/S {REPORT_COMPANY_NAME}")
+        self.assertIn("Commissioning Manager : Commissioning Lead", sheet["A33"].value)
+        self.assertIn("Project Manager : Project Lead", sheet["E33"].value)
+        self.assertIn("Engineer : Engineer", sheet["I33"].value)
+        for merge in ("A33:D37", "E33:H37", "I33:L37", "C26:L26"):
             self.assertIn(merge, str(sheet.merged_cells))
         self.assertEqual(sheet.page_setup.orientation, "portrait")
-        self.assertEqual(sheet["A8"].fill.fgColor.rgb, "003A3838")
         self.assertNotIn("Unapproved reason", [cell.value for row in sheet for cell in row])
         self.assertEqual(sheet.freeze_panes, "E9")
+
+    def test_activity_excel_uses_replaceable_template_formatting(self):
+        from geosite.activity_report import ACTIVITY_REPORT_TEMPLATE
+
+        template_path = Path(self.uploads.name) / "custom_activity_report.xlsx"
+        template = load_workbook(ACTIVITY_REPORT_TEMPLATE)
+        template.active["A8"].fill = PatternFill(
+            fill_type="solid", fgColor="FFFF0000"
+        )
+        template.active.column_dimensions["A"].width = 32
+        template.save(template_path)
+        template.close()
+
+        self._login_employee()
+        with patch(
+            "geosite.activity_report.ACTIVITY_REPORT_TEMPLATE", template_path
+        ):
+            response = self.client.get("/reports/activity.xlsx", query_string={
+                "site_id": self.site.id,
+                "start_date": "2026-10-19",
+                "end_date": "2026-10-19",
+            })
+
+        self.assertEqual(response.status_code, 200)
+        sheet = load_workbook(io.BytesIO(response.data)).active
+        self.assertEqual(sheet["A8"].fill.fgColor.rgb, "FFFF0000")
+        self.assertEqual(sheet.column_dimensions["A"].width, 32)
+
+    def test_activity_excel_preserves_template_and_expands_only_when_needed(self):
+        from geosite.activity_report import ACTIVITY_REPORT_TEMPLATE
+
+        self._login_employee()
+        for days in (1, 16, 20):
+            with self.subTest(days=days):
+                response = self.client.get("/reports/activity.xlsx", query_string={
+                    "site_id": self.site.id,
+                    "start_date": "2026-10-01",
+                    "end_date": f"2026-10-{days:02}",
+                })
+                self.assertEqual(response.status_code, 200)
+                sheet = load_workbook(io.BytesIO(response.data)).active
+                extra = max(0, days - 16)
+                self.assertEqual(sheet.max_row, 37 + extra)
+                self.assertEqual(sheet[f"A{25 + extra}"].value, "REMARKS")
+                self.assertEqual(sheet[f"A{8 + days}"].value, days)
+                self.assertEqual(sheet[f"I{33 + extra}"].value.strip(), "Engineer : Engineer")
+                self.assertIn(f"E{8 + days}:L{8 + days}", str(sheet.merged_cells))
+                with ZipFile(ACTIVITY_REPORT_TEMPLATE) as template, ZipFile(io.BytesIO(response.data)) as exported:
+                    self.assertEqual(template.namelist(), exported.namelist())
+                    changed = {"xl/worksheets/sheet1.xml"}
+                    if extra:
+                        changed.add("xl/workbook.xml")
+                    for part in template.namelist():
+                        if part not in changed:
+                            self.assertEqual(template.read(part), exported.read(part), part)
+                original = load_workbook(ACTIVITY_REPORT_TEMPLATE).active
+                if not extra:
+                    self.assertEqual(str(sheet.merged_cells), str(original.merged_cells))
+                    self.assertEqual(str(sheet.print_area), str(original.print_area))
+                    for row in original:
+                        for cell in row:
+                            self.assertEqual(sheet[cell.coordinate].style_id, cell.style_id)
+                        self.assertEqual(sheet.row_dimensions[row[0].row].height,
+                                         original.row_dimensions[row[0].row].height)
 
     def test_activity_excel_enforces_owner_and_valid_date_range(self):
         other = User(name="Other", email="other@example.com", mobile="3")

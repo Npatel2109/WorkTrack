@@ -1,46 +1,163 @@
 import io
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from math import ceil
+from pathlib import Path
+from xml.sax.saxutils import escape
+from zipfile import ZipFile
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+from openpyxl import load_workbook
+from openpyxl.cell.cell import Cell
+from openpyxl.utils.datetime import to_excel
 
 from .models import REPORT_COMPANY_NAME
 from .timeutils import india_date
 
+ACTIVITY_REPORT_TEMPLATE = (
+    Path(__file__).parent / "excel_templates" / "activity_report.xlsx"
+)
+
+
+def _fill_template(rows, site, employee):
+    # Patch only worksheet values so Excel-specific parts survive unchanged.
+    template_bytes = ACTIVITY_REPORT_TEMPLATE.read_bytes()
+    workbook = load_workbook(io.BytesIO(template_bytes))
+    sheet = workbook["SAR-R0"]
+    if workbook.sheetnames[0] != "SAR-R0":
+        raise ValueError("Activity template must have SAR-R0 as its first worksheet.")
+    remarks_row = next(
+        (cell.row for cell in sheet["A"] if cell.value == "REMARKS"), None
+    )
+    if remarks_row is None or remarks_row <= 9:
+        raise ValueError("Activity template must have activity rows from row 9 followed by REMARKS.")
+    extra = max(0, len(rows) - (remarks_row - 9))
+    values = {}
+
+    def text(address, value):
+        # Use openpyxl's string validation, but never treat user data as formulas.
+        value = Cell(sheet).check_string(str(value))
+        values[address] = (
+            '<is><t xml:space="preserve">'
+            + escape(value)
+            + "</t></is>"
+        )
+
+    def number(address, value):
+        values[address] = f"<v>{value}</v>"
+
+    def fill_label(address, value, destination=None):
+        label = sheet[address].value
+        if not isinstance(label, str) or ":" not in label:
+            raise ValueError(f"Activity template is missing a label at {address}.")
+        prefix, _, suffix = label.partition(":")
+        trailing = suffix[len(suffix.rstrip()):].strip(" \t")
+        text(destination or address, f"{prefix}: {value}{trailing}")
+
+    fill_label("A3", site.project.name if site.project else site.project_name or "Not specified")
+    fill_label("A4", site.customer_name)
+    fill_label("A5", f"{datetime.now(timezone.utc):%d %b %Y}")
+    fill_label("A6", site.site_name)
+    fill_label("A7", employee.name)
+    for index, (day, days, detail) in enumerate(rows, 9):
+        number(f"A{index}", index - 8)
+        text(f"B{index}", site.site_name)
+        number(f"C{index}", to_excel(day, workbook.epoch))
+        number(f"D{index}", days)
+        text(f"E{index}", detail)
+    remarks = site.report_remarks.splitlines()
+    for offset in range(1, 6):
+        text(f"C{remarks_row + extra + offset}", remarks[offset - 1] if offset <= len(remarks) else "")
+    number(f"K{remarks_row + extra + 6}", sum(days for _, days, _ in rows))
+    # Read labels at their original positions before shifting the footer XML.
+    footer_values = (
+        (f"A{remarks_row + 7}", site.customer_name),
+        (f"I{remarks_row + 7}", REPORT_COMPANY_NAME),
+        (f"A{remarks_row + 8}", site.commissioning_manager or ""),
+        (f"E{remarks_row + 8}", site.project_manager or ""),
+        (f"I{remarks_row + 8}", employee.name),
+    )
+    for address, value in footer_values:
+        match = re.fullmatch(r"([A-Z]+)(\d+)", address)
+        destination = f"{match[1]}{int(match[2]) + extra}"
+        if address.startswith("I") and address == f"I{remarks_row + 7}":
+            text(destination, f"M/S {value}")
+        else:
+            fill_label(address, value, destination)
+    workbook.close()
+
+    def shift_reference(match):
+        row = int(match[2])
+        return f"{match[1]}{row + extra if row >= remarks_row else row}"
+
+    output = io.BytesIO()
+    with ZipFile(io.BytesIO(template_bytes)) as source, ZipFile(output, "w") as target:
+        for entry in source.infolist():
+            data = source.read(entry.filename)
+            if entry.filename == "xl/worksheets/sheet1.xml":
+                xml = data.decode("utf-8")
+                if extra:
+                    row_pattern = r'<row\b[^>]*\br="(\d+)"[^>]*>.*?</row>'
+                    activity_row = next(
+                        match[0] for match in re.finditer(row_pattern, xml, re.DOTALL)
+                        if int(match[1]) == remarks_row - 1
+                    )
+
+                    def shift_row(match):
+                        if int(match[1]) < remarks_row:
+                            return match[0]
+                        shifted = re.sub(r"(\$?[A-Z]+\$?)(\d+)", shift_reference, match[0])
+                        return re.sub(r'(<row\b[^>]*\br=")\d+', lambda m: m[1] + str(int(match[1]) + extra), shifted, count=1)
+
+                    xml = re.sub(row_pattern, shift_row, xml, flags=re.DOTALL)
+                    added_rows = []
+                    for row in range(remarks_row, remarks_row + extra):
+                        clone = re.sub(r'(<row\b[^>]*\br=")\d+', lambda m: m[1] + str(row), activity_row, count=1)
+                        clone = re.sub(r'(\br="[A-Z]+)\d+(")', lambda m: m[1] + str(row) + m[2], clone)
+                        added_rows.append(clone)
+                    xml = re.sub(
+                        rf'<row\b(?=[^>]*\br="{remarks_row + extra}")',
+                        lambda m: "".join(added_rows) + m[0], xml, count=1,
+                    )
+                    xml = re.sub(
+                        r'(<(?:mergeCell|dimension)\b[^>]*\bref=")([^"]+)(")',
+                        lambda m: m[1] + re.sub(r"(\$?[A-Z]+\$?)(\d+)", shift_reference, m[2]) + m[3],
+                        xml,
+                    )
+                    merges = "".join(f'<mergeCell ref="E{row}:L{row}"/>' for row in range(remarks_row, remarks_row + extra))
+                    xml = xml.replace("</mergeCells>", merges + "</mergeCells>")
+                    xml = re.sub(r'(<mergeCells count=")(\d+)', lambda m: m[1] + str(int(m[2]) + extra), xml)
+
+                def fill_cell(match):
+                    address = match[1]
+                    if address not in values:
+                        return match[0]
+                    opening = match[0].split(">", 1)[0].rstrip("/")
+                    opening = re.sub(r'\s+t="[^"]*"', "", opening)
+                    content = values.pop(address)
+                    cell_type = ' t="inlineStr"' if content.startswith("<is>") else ""
+                    return opening + cell_type + ">" + content + "</c>"
+
+                xml = re.sub(
+                    r'<c\b(?=[^>]*\br="([A-Z]+\d+)")[^>]*?(?:/>|>.*?</c>)',
+                    fill_cell, xml, flags=re.DOTALL,
+                )
+                if values:
+                    raise ValueError(f"Activity template is missing data cells: {', '.join(values)}")
+                data = xml.encode("utf-8")
+            elif entry.filename == "xl/workbook.xml" and extra:
+                xml = data.decode("utf-8")
+                xml = re.sub(
+                    r'(<definedName\b[^>]*name="_xlnm.Print_Area"[^>]*>)(.*?)(</definedName>)',
+                    lambda m: m[1] + re.sub(r"(\$?[A-Z]+\$?)(\d+)", shift_reference, m[2]) + m[3],
+                    xml,
+                )
+                data = xml.encode("utf-8")
+            target.writestr(entry, data)
+    output.seek(0)
+    return output
+
 
 def activity_workbook(site, visits, leaves, start, end, employee, automatic_leave=()):
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "SAR-R0"
-    ink = "262626"
-    charcoal = "3A3838"
-    thin = Side(style="thin", color="808080")
-
-    def text(cell, value):
-        cell.value = str(value)
-        cell.data_type = "s"
-
-    def merged(row, first, last, value):
-        sheet.merge_cells(start_row=row, start_column=first, end_row=row, end_column=last)
-        text(sheet.cell(row, first), value)
-
-    sheet.merge_cells("A1:L2")
-    text(sheet["A1"], "SITE ACTIVITY REPORT")
-    sheet["A1"].font = Font(name="Calibri", size=15, bold=True, color="FFFFFF")
-    sheet["A1"].fill = PatternFill("solid", fgColor=ink)
-    sheet["A1"].alignment = Alignment(horizontal="center", vertical="center")
-    merged(3, 1, 12, f"PROJECT : {site.project.name if site.project else site.project_name or 'Not specified'}")
-    merged(4, 1, 12, f"CUSTOMER : {site.customer_name}")
-    merged(5, 1, 12, f"REPORT UPDATE DATE : {datetime.now(timezone.utc):%d %b %Y}")
-    merged(6, 1, 12, f"SITE DETAIL : {site.site_name}")
-    merged(7, 1, 12, f"ENGINEER : {employee.name}")
-    for column, label in enumerate(("SR NO", "SITE", "DATE", "DAY", "ACTIVITY DETAIL"), 1):
-        text(sheet.cell(8, column), label)
-    sheet.merge_cells("E8:L8")
-
     by_date = defaultdict(list)
     for visit in visits:
         by_date[india_date(visit.checkout_time)].append(visit)
@@ -75,71 +192,4 @@ def activity_workbook(site, visits, leaves, start, end, employee, automatic_leav
         if not by_date[day] and not leave_rows and not automatic_rows:
             rows.append((day, 0, "Sunday" if day.weekday() == 6 else "No activity recorded"))
         day += timedelta(days=1)
-
-    for number, (day, days, detail) in enumerate(rows, 1):
-        row = number + 8
-        sheet.cell(row, 1, number)
-        text(sheet.cell(row, 2), site.site_name)
-        sheet.cell(row, 3, day).number_format = "dd-mmm-yyyy"
-        sheet.cell(row, 4, days)
-        merged(row, 5, 12, detail)
-        sheet.row_dimensions[row].height = min(240, max(38, ceil(len(detail) / 95) * 15 + detail.count("\n") * 15))
-    remarks_row = len(rows) + 9
-    merged(remarks_row, 1, 12, "REMARKS")
-    remarks = site.report_remarks.splitlines()
-    for offset in range(1, 6):
-        sheet.cell(remarks_row + offset, 1, offset)
-        merged(remarks_row + offset, 3, 12, remarks[offset - 1] if offset <= len(remarks) else "")
-        sheet.row_dimensions[remarks_row + offset].height = max(
-            20, ceil(len(remarks[offset - 1]) / 105) * 15 if offset <= len(remarks) else 20
-        )
-    total_row = remarks_row + 6
-    merged(total_row, 1, 10, "TOTAL DAYS :")
-    sheet.merge_cells(start_row=total_row, start_column=11, end_row=total_row, end_column=12)
-    sheet.cell(total_row, 11, sum(days for _, days, _ in rows))
-    merged(total_row + 1, 1, 8, f"CUSTOMER : {site.customer_name}")
-    merged(total_row + 1, 9, 12, f"M/S {REPORT_COMPANY_NAME}")
-    signature_start = total_row + 2
-    signature_end = total_row + 6
-    for first, last, label in (
-        (1, 4, f"Commissioning Manager : {site.commissioning_manager or '____________________'}"),
-        (5, 8, f"Project Manager : {site.project_manager or '____________________'}"),
-        (9, 12, f"Engineer : {employee.name}"),
-    ):
-        sheet.merge_cells(
-            start_row=signature_start, start_column=first,
-            end_row=signature_end, end_column=last,
-        )
-        name_line = "\nCustomer representative: ____________________" if first == 1 else ""
-        text(sheet.cell(signature_start, first), label + name_line + "\n\nSignature: ____________________\nDate: ____________________")
-    for row in range(signature_start, signature_end + 1):
-        sheet.row_dimensions[row].height = 20
-
-    for row in sheet.iter_rows(min_row=3, max_row=signature_end, max_col=12):
-        for cell in row:
-            cell.font = Font(name="Calibri", size=11, color=ink)
-            cell.alignment = Alignment(vertical="center", wrap_text=True)
-            cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    for row_number in (8, remarks_row, total_row + 1):
-        for cell in sheet[row_number][:12]:
-            cell.fill = PatternFill("solid", fgColor=charcoal)
-            cell.font = Font(name="Calibri", size=9, bold=True, color="FFFFFF")
-    for row in range(3, 8):
-        sheet.row_dimensions[row].height = 30
-        for cell in sheet[row][:12]:
-            cell.fill = PatternFill("solid", fgColor="F2F2F2")
-            cell.font = Font(name="Calibri", size=11, bold=True, color=ink)
-    for col, width in enumerate((5.22, 16, 13.55, 5.44, 11.22, 11.78, 8.44, 13.22, 8.78, 13, 9.78, 16.11), 1):
-        sheet.column_dimensions[get_column_letter(col)].width = width
-    sheet.freeze_panes = "E9"
-    sheet.print_title_rows = "1:8"
-    sheet.print_area = f"A1:L{signature_end}"
-    sheet.sheet_properties.pageSetUpPr.fitToPage = True
-    sheet.page_setup.orientation = "portrait"
-    sheet.page_setup.paperSize = sheet.PAPERSIZE_A4
-    sheet.page_setup.fitToWidth = 1
-    sheet.page_setup.fitToHeight = 0
-    output = io.BytesIO()
-    workbook.save(output)
-    output.seek(0)
-    return output
+    return _fill_template(rows, site, employee)

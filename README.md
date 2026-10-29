@@ -268,6 +268,20 @@ five numbered remarks lines, total days and three offline sign-off boxes
 Excel layout with grayscale headers and portrait printing. The report update
 date is the UTC export date. Customer and manager details come from the selected
 site and employee; reporting company is always Blackpurple automation.
+To customize the downloaded report's formatting, replace
+`geosite/excel_templates/activity_report.xlsx` with your edited Excel template.
+The app fills the `SAR-R0` worksheet directly, preserving the workbook's styles,
+merged cells, row heights, column widths, static text and Excel printer settings.
+Keep this worksheet first, headers in rows 1-8, activity columns A-E (detail
+merged across E-L), and a `REMARKS` label in column A below the activity rows.
+Keep the five remarks rows and totals/customer/sign-off section below that label.
+Unused activity rows remain blank so short reports retain your exact layout.
+If more activities are needed than the template allows, matching rows are added
+before `REMARKS` and the footer and print area move down. Existing activity-row
+heights are not changed; adjust them in Excel for the desired text capacity.
+Only data fields are replaced; edit other labels, formatting and print options
+in the template. Do not put real activity data in its blank activity rows.
+Restarting the app is not required after replacing the file.
 Employees can export only their own sites; admins can select any site, including
 archived assignments. Dates use the completed visit's India-local checkout date.
 Admin **Export Excel** buttons open this same report form rather than a separate
