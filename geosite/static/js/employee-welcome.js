@@ -4,10 +4,11 @@
   const skip = document.getElementById("robot-skip");
   const play = document.getElementById("robot-play-voice");
   const status = document.getElementById("robot-voice-status");
+  const dailyWelcome = dialog.dataset.kind !== "thank-you";
   const key = `worktrack-welcome-${dialog.dataset.employee}`;
   let storageAvailable = true;
   try {
-    if (localStorage.getItem(key) === dialog.dataset.day) return;
+    if (dailyWelcome && localStorage.getItem(key) === dialog.dataset.day) return;
   } catch (error) {
     storageAvailable = false;
     console.warn("Daily welcome preference could not be read.", error.name);
@@ -78,7 +79,7 @@
   };
   dialog.showModal();
   try {
-    if (storageAvailable) localStorage.setItem(key, dialog.dataset.day);
+    if (dailyWelcome && storageAvailable) localStorage.setItem(key, dialog.dataset.day);
   } catch (error) {
     storageAvailable = false;
     console.warn("Daily welcome preference could not be saved.", error.name);

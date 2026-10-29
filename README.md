@@ -100,6 +100,15 @@ retries when automatic audio is blocked. Voice availability varies by device,
 and text/Skip remain usable without it. No external API key or video download is
 required. The selected speech engine may use its own online services.
 
+After each successful **Submit report & complete visit**, the same robot says
+"Thank you, [first name]! Your site report has been submitted. Thank you for your hard work!"
+on the employee dashboard. It closes when speech finishes, with the same
+fallback timers, **Play voice**, Escape and **Continue to dashboard** controls.
+This acknowledgement is per submitted report, not limited by the daily login
+greeting, and does not repeat on dashboard reloads or report validation errors.
+Ending a site visit alone does not trigger it: the report must be successfully
+submitted first. Stop times and report submission behavior are unchanged.
+
 ## Employee report voice typing
 
 **Start microphone** beside Activity detail adds English speech to the end of

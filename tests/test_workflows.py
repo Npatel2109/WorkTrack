@@ -1592,6 +1592,48 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn(b"Hello, &lt;Test&gt;!", response.data)
         self.assertNotIn(b"Hello, <Test>!", response.data)
 
+    def test_robot_thank_you_only_after_successful_report_and_for_each_visit(self):
+        self._login_employee()
+        self.employee.name = "<Test> & Engineer"
+        db.session.commit()
+        for _ in range(2):
+            visit = Attendance(
+                employee_id=self.employee.id, site_id=self.site.id,
+                status="onsite", checkin_lat=0, checkin_lon=0,
+                checkin_time=datetime.now(timezone.utc), checkin_selfie="selfie.png",
+            )
+            db.session.add(visit)
+            db.session.commit()
+            response = self.client.post(
+                f"/api/visit/{visit.id}/verify-checkout",
+                json={"latitude": 0, "longitude": 0},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn(b'id="employee-welcome"', self.client.get(response.json["next"]).data)
+            self.assertNotIn(b'id="employee-welcome"', self.client.get("/employee").data)
+            report_url = f"/visit/{visit.id}/report"
+            response = self.client.post(report_url, data={"activity_detail": "Incomplete"})
+            self.assertNotIn(b'id="employee-welcome"', response.data)
+            self.assertNotIn(b'id="employee-welcome"', self.client.get("/employee").data)
+            response = self.client.post(report_url, data={
+                "activity_detail": "Inspection", "billing": "billable",
+                "engineer_name": self.employee.name,
+            }, follow_redirects=True)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b'data-kind="thank-you"', response.data)
+            self.assertEqual(response.data.count(b'id="employee-welcome"'), 1)
+            self.assertIn(b"Thank you, &lt;Test&gt;!", response.data)
+            self.assertNotIn(b"Thank you, <Test>!", response.data)
+            self.assertIn(b"Your site report has been submitted.", response.data)
+            self.assertIn(b"Continue to dashboard", response.data)
+            self.assertIn(b"employee-welcome.js", response.data)
+            db.session.refresh(visit)
+            self.assertEqual(visit.status, "completed")
+            self.assertIsNotNone(visit.report)
+            self.assertNotIn(b'id="employee-welcome"', self.client.get("/employee").data)
+            self.assertEqual(self.client.post(report_url, data={}).status_code, 403)
+            self.assertNotIn(b'id="employee-welcome"', self.client.get("/employee").data)
+
     def test_employee_workspace_uses_admin_assigned_designation(self):
         self._login_admin()
         response = self.client.post(f"/admin/employees/{self.employee.id}/edit", data={

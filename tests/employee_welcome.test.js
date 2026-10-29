@@ -5,7 +5,7 @@ const { test } = require("node:test");
 const vm = require("node:vm");
 const source = readFileSync(join(__dirname, "..", "geosite", "static", "js", "employee-welcome.js"), "utf8");
 
-function setup({ saved, blocked = false, speech = true, throws = false, dialogSupport = true } = {}) {
+function setup({ saved, blocked = false, speech = true, throws = false, dialogSupport = true, thankYou = false } = {}) {
   const elements = {};
   for (const id of ["employee-welcome", "robot-skip", "robot-play-voice", "robot-voice-status", "robot-welcome-title", "robot-welcome-message", "main-content"]) {
     elements[id] = {
@@ -15,10 +15,13 @@ function setup({ saved, blocked = false, speech = true, throws = false, dialogSu
     };
   }
   const dialog = elements["employee-welcome"];
+  dialog.dataset.kind = thankYou ? "thank-you" : "welcome";
   dialog.close = () => { dialog.open = false; dialog.events.close?.(); };
   if (dialogSupport) dialog.showModal = () => { dialog.open = true; };
-  elements["robot-welcome-title"].textContent = "Hello, Engineer!";
-  elements["robot-welcome-message"].textContent = "What are you doing today? Let's make it a great day!";
+  elements["robot-welcome-title"].textContent = thankYou ? "Thank you, Engineer!" : "Hello, Engineer!";
+  elements["robot-welcome-message"].textContent = thankYou
+    ? "Your site report has been submitted. Thank you for your hard work!"
+    : "What are you doing today? Let's make it a great day!";
   const timers = new Map();
   const savedValues = [];
   const spoken = [];
@@ -67,6 +70,32 @@ test("same-day greeting is suppressed and next-day greeting appears", () => {
   assert.equal(same.spoken.length, 0);
   assert.equal(same.timers.size, 0);
   assert.equal(setup({ saved: "2026-10-28" }).dialog.open, true);
+});
+
+test("each report thank-you speaks in full despite the daily welcome and does not change its preference", () => {
+  for (let visit = 0; visit < 2; visit += 1) {
+    const app = setup({ saved: "2026-10-29", thankYou: true, blocked: true });
+    assert.equal(app.dialog.open, true);
+    assert.deepEqual(app.savedValues, []);
+    assert.match(app.spoken[0].text, /Thank you, Engineer! Your site report has been submitted/);
+    assert.doesNotMatch(app.elements["robot-voice-status"].textContent, /cannot be saved/);
+    app.spoken[0].onstart();
+    assert.equal(app.timers.has(4000), false);
+    assert.equal(app.dialog.open, true);
+    app.spoken[0].onend();
+    assert.equal(app.dialog.open, false);
+    assert.equal(app.elements["main-content"].focused, true);
+  }
+});
+
+test("report thank-you permits skip and fallback when audio is unavailable", () => {
+  const skipped = setup({ thankYou: true });
+  skipped.elements["robot-skip"].events.click();
+  assert.equal(skipped.dialog.open, false);
+  assert.equal(skipped.cancelled(), 1);
+  const silent = setup({ thankYou: true, speech: false });
+  silent.timers.get(4000)();
+  assert.equal(silent.dialog.open, false);
 });
 
 test("skip, Escape and navigation close the greeting and stop speech", () => {

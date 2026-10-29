@@ -1239,6 +1239,7 @@ def employee_dashboard():
     return render_template(
         "employee_dashboard.html",
         show_employee_welcome=session.pop("employee_welcome_pending", False),
+        show_employee_thank_you=session.pop("employee_thank_you_pending", False),
         sites=AssignedSite.query.filter_by(is_active=True).filter(
             AssignedSite.assignments.any(employee_id=current_user.id, is_active=True)
         ).all(),
@@ -2048,6 +2049,7 @@ def site_report_form(attendance_id):
         )
         write_audit(current_user, "site_report_submitted", f"Attendance {attendance.id}")
         db.session.commit()
+        session["employee_thank_you_pending"] = True
         flash("Site visit completed successfully.", "success")
         return redirect(url_for("main.employee_dashboard"))
     return render_template("site_report.html", attendance=attendance, values={})
