@@ -2,6 +2,37 @@
 {% block title %}My field dashboard{% endblock %}
 {% block content %}
 {% from "_icons.html" import icon %}
+{% if show_employee_welcome %}
+<dialog class="robot-welcome" id="employee-welcome" aria-labelledby="robot-welcome-title" aria-describedby="robot-welcome-message" data-employee="{{ current_user.id }}" data-day="{{ today.isoformat() }}">
+  <div class="robot-confetti" aria-hidden="true"><span>+</span><span>*</span><span>+</span><span>*</span></div>
+  <svg class="welcome-robot" viewBox="0 0 240 220" aria-hidden="true">
+    <ellipse cx="120" cy="204" rx="60" ry="9" fill="#ddd7ff"/>
+    <g class="robot-float">
+      <path d="M120 32V16" stroke="#8471e9" stroke-width="7" stroke-linecap="round"/>
+      <circle cx="120" cy="13" r="9" fill="#ffcc72"/>
+      <rect x="57" y="35" width="126" height="101" rx="32" fill="#8d7af1"/>
+      <rect x="69" y="47" width="102" height="73" rx="23" fill="#27234e"/>
+      <g class="robot-eyes" fill="#aaf3e4"><rect x="88" y="68" width="15" height="23" rx="7"/><rect x="137" y="68" width="15" height="23" rx="7"/></g>
+      <path d="M108 103Q120 113 132 103" fill="none" stroke="#aaf3e4" stroke-width="5" stroke-linecap="round"/>
+      <rect x="47" y="69" width="12" height="33" rx="6" fill="#b9aff9"/>
+      <rect x="181" y="69" width="12" height="33" rx="6" fill="#b9aff9"/>
+      <rect x="83" y="143" width="74" height="45" rx="18" fill="#8d7af1"/>
+      <circle cx="120" cy="162" r="8" fill="#ffcc72"/>
+      <path d="M96 191V199M144 191V199" stroke="#6255b6" stroke-width="12" stroke-linecap="round"/>
+      <path d="M76 151L59 174" stroke="#b9aff9" stroke-width="12" stroke-linecap="round"/>
+      <g class="robot-wave"><path d="M164 151L190 126L194 109" fill="none" stroke="#b9aff9" stroke-width="12" stroke-linecap="round"/><circle cx="194" cy="104" r="10" fill="#ffcc72"/></g>
+    </g>
+  </svg>
+  <p class="eyebrow">YOUR WORKDAY SIDEKICK</p>
+  <h2 id="robot-welcome-title">Hello, {{ current_user.name.split(' ')[0] }}!</h2>
+  <p id="robot-welcome-message">What are you doing today? Let's make it a great day!</p>
+  <p class="small text-secondary" id="robot-voice-status" role="status">Opening your dashboard in a moment...</p>
+  <div class="d-flex justify-content-center flex-wrap gap-2">
+    <button class="btn btn-outline-primary" type="button" id="robot-play-voice">Play voice</button>
+    <button class="btn btn-primary" type="button" id="robot-skip">Skip to dashboard</button>
+  </div>
+</dialog>
+{% endif %}
 <section class="page-heading dashboard-hero">
   <div class="hero-copy"><p class="eyebrow">{{ icon("spark") }} YOUR DAY, CONNECTED</p><h1>Hello, {{ current_user.name.split(' ')[0] }}<span class="hero-heading-dot">.</span></h1><p>A fresh start. Everything you need for a great workday.</p>
     <div class="hero-meta"><span>{{ icon("calendar") }} {{ today.strftime("%A, %d %b") }}</span><span>{{ current_user.designation }} workspace</span>{% if active_attendance %}<span class="hero-live"><i></i> Onsite now</span>{% endif %}</div>
@@ -39,4 +70,7 @@
       {% else %}<tr><td colspan="5" class="empty-state">Completed visits and reports will appear here.</td></tr>{% endfor %}</tbody>  </table></div>
 </section>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='js/daily-status.js') }}"></script>{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/daily-status.js') }}"></script>
+{% if show_employee_welcome %}<script src="{{ url_for('static', filename='js/employee-welcome.js', v='20261029-2') }}"></script>{% endif %}
+{% endblock %}

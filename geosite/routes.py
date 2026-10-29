@@ -371,6 +371,8 @@ def login():
         if user and user.check_password(request.form.get("password", "")):
             login_user(user)
             session["last_activity"] = utcnow().isoformat()
+            if not user.is_admin:
+                session["employee_welcome_pending"] = True
             write_audit(user, "login", ip_address=request.remote_addr)
             db.session.commit()
             return redirect(
@@ -1236,6 +1238,7 @@ def employee_dashboard():
         visit.duration_label = _format_hours(_attendance_hours(visit))
     return render_template(
         "employee_dashboard.html",
+        show_employee_welcome=session.pop("employee_welcome_pending", False),
         sites=AssignedSite.query.filter_by(is_active=True).filter(
             AssignedSite.assignments.any(employee_id=current_user.id, is_active=True)
         ).all(),
@@ -2519,12 +2522,54 @@ def export_excel():
 @bp.route("/admin/attendance")
 @admin_required
 def attendance_history():
-    visits = Attendance.query.order_by(Attendance.checkin_time.desc()).limit(500).all()
-    logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(500).all()
     now = utcnow()
+    today = india_date(now).isoformat()
+    filters = {name: request.args.get(name, default).strip() for name, default in (
+        ("employee_id", ""), ("site_id", ""), ("status", ""),
+        ("from_date", today), ("to_date", today),
+    )}
+    query = Attendance.query.options(joinedload(Attendance.employee), joinedload(Attendance.site))
+    for field, model in (("employee_id", User), ("site_id", AssignedSite)):
+        if filters[field]:
+            try:
+                identifier = int(filters[field])
+            except ValueError:
+                abort(400, description="Select a valid employee or site.")
+            if not 1 <= identifier <= 9223372036854775807 or db.session.get(model, identifier) is None:
+                abort(400, description="Select an existing employee or site.")
+            query = query.filter(getattr(Attendance, field) == identifier)
+    statuses = ("onsite", "report_pending", "completed")
+    if filters["status"]:
+        if filters["status"] not in statuses:
+            abort(400, description="Select a valid attendance status.")
+        query = query.filter_by(status=filters["status"])
+    try:
+        start = date.fromisoformat(filters["from_date"]) if filters["from_date"] else None
+        end = date.fromisoformat(filters["to_date"]) if filters["to_date"] else None
+        if start == date.min:
+            raise ValueError("Date is outside the supported timezone range.")
+    except ValueError:
+        abort(400, description="Enter valid attendance filter dates in YYYY-MM-DD format.")
+    if start and end and end < start:
+        abort(400, description="The filter end date must be on or after the start date.")
+    if start:
+        query = query.filter(Attendance.checkin_time >= datetime.combine(
+            start, datetime.min.time(), tzinfo=INDIA_TIME
+        ).astimezone(timezone.utc))
+    if end:
+        query = query.filter(Attendance.checkin_time <= datetime.combine(
+            end, datetime.max.time(), tzinfo=INDIA_TIME
+        ).astimezone(timezone.utc))
+    visits = query.order_by(Attendance.checkin_time.desc(), Attendance.id.desc()).limit(501).all()
+    truncated = len(visits) > 500
+    visits = visits[:500]
+    logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(500).all()
     return render_template(
         "attendance.html", attendance=visits, audit_logs=logs,
         visit_durations={visit.id: _format_hours(_attendance_hours(visit, now)) for visit in visits},
+        filters=filters, attendance_statuses=statuses, truncated=truncated,
+        employees=User.query.filter_by(role="employee").order_by(User.name, User.id).all(),
+        sites=AssignedSite.query.order_by(AssignedSite.site_name, AssignedSite.id).all(),
     )
 
 

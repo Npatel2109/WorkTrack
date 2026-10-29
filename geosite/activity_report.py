@@ -195,8 +195,6 @@ def activity_workbook(site, visits, leaves, start, end, employee, automatic_leav
                 ]
                 detail = "\n".join([detail] + [value for value in legacy if value])
                 detail += "\n[Billing not recorded in legacy report; counted as 0]"
-            elif not report.is_billable:
-                detail += "\n[Non-billable]"
             billable_day = report.is_billable is True and not billable_day_recorded
             billable_day_recorded = billable_day_recorded or billable_day
             details.append(detail)

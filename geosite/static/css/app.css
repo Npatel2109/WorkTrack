@@ -244,6 +244,23 @@ html[data-theme="dark"] .bg-body-tertiary { background-color: #152136 !important
 .attendance-locations dl { margin: 1rem 0 0; min-width: 260px; line-height: 1.65; }
 .attendance-locations dt { margin-top: .8rem; }
 .attendance-locations dd { margin: .2rem 0 0; }
+.attendance-distance { min-width: 220px; line-height: 1.8; }
+.robot-welcome { width: min(460px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 1.5rem; border: 1px solid var(--border); border-radius: 28px; background: var(--surface); color: var(--ink); text-align: center; box-shadow: 0 24px 90px #29204b33; overflow: auto; }
+.robot-welcome::backdrop { background: #19132d99; backdrop-filter: blur(5px); }
+.robot-welcome h2 { font-size: clamp(1.5rem, 5vw, 2rem); overflow-wrap: anywhere; }
+.welcome-robot { width: 210px; max-width: 65%; }
+.robot-float { animation: robot-bob 1.4s ease-in-out infinite alternate; }
+.robot-wave { transform-origin: 164px 151px; animation: robot-wave .65s ease-in-out infinite alternate; }
+.robot-eyes { transform-origin: 120px 80px; animation: robot-blink 3s infinite; }
+.robot-confetti { display: flex; justify-content: space-around; color: var(--blue); font-size: 1.5rem; height: 12px; }
+.robot-confetti span { animation: robot-bob .9s ease-in-out infinite alternate; }
+.robot-confetti span:nth-child(even) { color: #d69928; animation-delay: .4s; }
+@keyframes robot-bob { from { transform: translateY(0); } to { transform: translateY(-7px); } }
+@keyframes robot-wave { from { transform: rotate(-8deg); } to { transform: rotate(12deg); } }
+@keyframes robot-blink { 0%, 42%, 48%, 100% { transform: scaleY(1); } 45% { transform: scaleY(.1); } }
+@media (prefers-reduced-motion: reduce) {
+  .robot-welcome * { animation: none !important; }
+}
 @media (min-width: 992px) and (max-width: 1250px) {
   .employee-shortcuts { grid-template-columns: 1fr; gap: .65rem; }
   .dashboard-hero { flex-wrap: wrap; }

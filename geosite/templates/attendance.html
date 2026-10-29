@@ -10,15 +10,30 @@
 {% endmacro %}
 <div class="page-heading"><div><p class="eyebrow">AUDIT &amp; ATTENDANCE</p><h1>Attendance history</h1><p class="text-secondary mb-0">Site visit records and account access events.</p></div></div>
 <section class="panel-card mb-4"><div class="section-title"><div><p class="eyebrow">SITE VISITS</p><h2>Attendance records</h2></div></div>
+  <form method="get" class="row g-3 mb-4" aria-label="Filter attendance">
+    <div class="col-md-6 col-xl-3"><label class="form-label" for="attendance-employee">Employee</label><select class="form-select" id="attendance-employee" name="employee_id"><option value="">All employees</option>{% for employee in employees %}<option value="{{ employee.id }}"{% if filters.employee_id == employee.id|string %} selected{% endif %}>{{ employee.name }} - {{ employee.email }}{% if not employee.is_active %} (inactive){% endif %}</option>{% endfor %}</select></div>
+    <div class="col-md-6 col-xl-3"><label class="form-label" for="attendance-site">Site</label><select class="form-select" id="attendance-site" name="site_id"><option value="">All sites</option>{% for site in sites %}<option value="{{ site.id }}"{% if filters.site_id == site.id|string %} selected{% endif %}>{{ site.site_name }}{% if not site.is_active %} (archived){% endif %}</option>{% endfor %}</select></div>
+    <div class="col-md-4 col-xl-2"><label class="form-label" for="attendance-status">Status</label><select class="form-select" id="attendance-status" name="status"><option value="">All statuses</option>{% for status in attendance_statuses %}<option value="{{ status }}"{% if filters.status == status %} selected{% endif %}>{{ status|replace("_", " ")|title }}</option>{% endfor %}</select></div>
+    <div class="col-md-4 col-xl-2"><label class="form-label" for="attendance-from">From date</label><input class="form-control" id="attendance-from" type="date" name="from_date" value="{{ filters.from_date }}"></div>
+    <div class="col-md-4 col-xl-2"><label class="form-label" for="attendance-to">To date</label><input class="form-control" id="attendance-to" type="date" name="to_date" value="{{ filters.to_date }}"></div>
+    <div class="col-12 d-flex flex-wrap gap-2"><button class="btn btn-primary">Apply filters</button><a class="btn btn-outline-secondary" href="{{ url_for('main.attendance_history') }}">Reset to today</a><a class="btn btn-outline-secondary" href="{{ url_for('main.attendance_history', from_date='', to_date='') }}">All history</a></div>
+    <p class="form-text mb-0">Dates filter the visit's check-in date in IST. Clear either date for an open-ended range. Filters apply to attendance records only, not the access log below.</p>
+  </form>
+  {% if truncated %}<div class="alert alert-info" role="status">Showing the latest 500 matching visits. Narrow the filters to find older records.</div>{% endif %}
   <p class="small text-secondary">Forgotten visits stop at 23:59 Asia/Kolkata (India). Times below are IST (UTC+05:30); distances are in km. Last-known locations show when they were actually captured, not a fresh GPS fix at stop time. Historical distances not recorded before this update are left blank.</p>
   <p class="small text-secondary">On-site hours are the elapsed time between check-in and check-out, not verified time inside the site boundary. Active visits show elapsed time as of this page load. Open Location details for GPS coordinates and distances.</p>
-  <div class="table-responsive"><table class="table attendance-table"><thead><tr><th>Employee</th><th>Site</th><th>Check-in (IST)</th><th>Check-out (IST)</th><th>On-site hours</th><th>Status</th><th>Location details</th></tr></thead>
+  <div class="table-responsive"><table class="table attendance-table"><thead><tr><th>Employee</th><th>Site</th><th>Check-in (IST)</th><th>Check-out (IST)</th><th>On-site hours</th><th>Status</th><th>Distance from assigned site (km)</th><th>Location details</th></tr></thead>
     <tbody>{% for row in attendance %}<tr>
       <td class="attendance-person">{{ row.employee.name }}</td><td class="attendance-site">{{ row.site.site_name }}</td>
       <td class="attendance-time">{{ row.checkin_time|ist }}</td>
       <td class="attendance-time">{{ row.checkout_time|ist if row.checkout_time else "—" }}{% if row.auto_closed %}<div class="small">Auto-stopped (23:59 India)</div>{% endif %}</td>
       <td class="attendance-duration">{{ visit_durations[row.id] }}{% if not row.checkout_time %}<div class="small text-secondary">In progress</div>{% endif %}</td>
       <td><span class="status-pill {{ row.status }}">{{ row.status|replace("_", " ")|title }}</span></td>
+      <td class="attendance-distance">
+        <div><strong>Start:</strong> {{ "%.3f km"|format(row.checkin_distance_m / 1000) if row.checkin_distance_m is not none else "Not recorded" }}</div>
+        <div><strong>End:</strong> {% if not row.checkout_time %}Not stopped{% elif row.checkout_distance_m is not none %}{{ "%.3f km"|format(row.checkout_distance_m / 1000) }}{% else %}Not recorded{% endif %}</div>
+        {% if row.checkout_time and row.checkout_location_source == "last_known" %}<div class="small text-secondary">End uses last captured location</div>{% endif %}
+      </td>
       <td><details class="attendance-locations"><summary>Location details</summary><dl>
         <dt>Assigned location at start</dt><dd>{{ location(row.site_latitude, row.site_longitude) }}</dd>
         <dt>Start location / distance (km)</dt><dd>{{ location(row.checkin_lat, row.checkin_lon, row.checkin_distance_m, row.checkin_location_time) }}</dd>
@@ -29,7 +44,7 @@
         {% else %}Not stopped{% endif %}</dd>
       </dl></details></td>
     </tr>
-    {% else %}<tr><td colspan="7" class="empty-state">No attendance records.</td></tr>{% endfor %}</tbody>
+    {% else %}<tr><td colspan="8" class="empty-state">No attendance records match these filters.</td></tr>{% endfor %}</tbody>
   </table></div>
 </section>
 <section class="panel-card"><div class="section-title"><div><p class="eyebrow">ACCESS LOG</p><h2>Login / logout events</h2></div></div>

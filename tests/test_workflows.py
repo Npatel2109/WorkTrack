@@ -145,8 +145,14 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("E8:L8", str(sheet.merged_cells))
         self.assertEqual([sheet.cell(8, c).value for c in range(1, 6)],
                          ["SR NO", "SITE", "DATE", "DAY", "ACTIVITY DETAIL"])
+        for address in ("A1", "A8", "B8", "C8", "D8", "E8", "A25", "A32", "I32"):
+            self.assertEqual(sheet[address].alignment.horizontal, "center", address)
+            self.assertEqual(sheet[address].alignment.vertical, "center", address)
+            self.assertEqual(sheet[address].fill.patternType, "solid", address)
+            self.assertEqual(sheet[address].font.color.rgb, "FFFFFFFF", address)
         self.assertEqual([sheet.cell(r, 4).value for r in range(9, 13)], [1, 0, 0, 0])
-        self.assertEqual(sheet["E9"].value, "Billable work\nNon-billable meeting\n[Non-billable]\n=literal activity")
+        self.assertEqual(sheet["E9"].value, "Billable work\nNon-billable meeting\n=literal activity")
+        self.assertNotIn("[Non-billable]", sheet["E9"].value)
         self.assertEqual(sheet["E9"].data_type, "s")
         self.assertTrue(sheet["E9"].alignment.wrap_text)
         self.assertGreater(sheet.row_dimensions[9].height, 37.95)
@@ -657,7 +663,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn(b"Onsite now", response.data)
         self.client.post("/logout")
         self.client.post("/login", data={"email": self.admin.email, "password": "admin-password-123"})
-        response = self.client.get("/admin/attendance")
+        response = self.client.get("/admin/attendance?from_date=&to_date=")
         self.assertEqual(response.status_code, 200)
         for text in (b"1.112 km from assigned site", b"Last captured location", b"Daily Cutoff",
                      b"Report Pending", b"0.00000, 0.01000", b"Auto-stopped (23:59 India)"):
@@ -813,7 +819,7 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn(value, text)
         self.assertNotIn(" UTC", text)
         response.close()
-        history = self.client.get("/admin/attendance")
+        history = self.client.get("/admin/attendance?from_date=&to_date=")
         for value in (b"1.112 km from assigned site", b"2.224 km from assigned site",
                       b"27 Oct 2026 00:30 IST", b"27 Oct 2026 01:30 IST"):
             self.assertIn(value, history.data)
@@ -826,7 +832,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("0.000 km", text)
         self.assertIn("Not recorded", text)
         response.close()
-        self.assertIn(b"0.000 km from assigned site", self.client.get("/admin/attendance").data)
+        self.assertIn(b"0.000 km from assigned site", self.client.get("/admin/attendance?from_date=&to_date=").data)
 
     def test_employee_pdf_downloads_are_denied_but_history_and_excel_remain(self):
         visit = self._completed_display_visit(datetime(2026, 10, 26, 12, tzinfo=timezone.utc))
@@ -1566,6 +1572,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn(b"Project name", page.data)
         self.assertIn(b'href="/admin/projects"', page.data)
 
+    def test_robot_welcome_only_follows_successful_employee_login(self):
+        response = self.client.post("/login", data={
+            "email": self.employee.email, "password": "wrong",
+        }, follow_redirects=True)
+        self.assertNotIn(b'id="employee-welcome"', response.data)
+        response = self._login_employee()
+        self.assertIn(b'id="employee-welcome"', response.data)
+        self.assertIn(b"Hello, Engineer!", response.data)
+        self.assertIn(b"employee-welcome.js", response.data)
+        self.assertNotIn(b'id="employee-welcome"', self.client.get("/employee").data)
+        self.client.post("/logout")
+        response = self._login_admin()
+        self.assertNotIn(b'id="employee-welcome"', response.data)
+        self.client.post("/logout")
+        self.employee.name = '<Test> & Engineer'
+        db.session.commit()
+        response = self._login_employee()
+        self.assertIn(b"Hello, &lt;Test&gt;!", response.data)
+        self.assertNotIn(b"Hello, <Test>!", response.data)
+
     def test_employee_workspace_uses_admin_assigned_designation(self):
         self._login_admin()
         response = self.client.post(f"/admin/employees/{self.employee.id}/edit", data={
@@ -1653,6 +1679,91 @@ class WorkflowTests(unittest.TestCase):
         self.client.post("/logout")
         self._login_employee()
         self.assertEqual(self.client.get("/admin/attendance").status_code, 403)
+
+    def test_attendance_filters_use_ist_checkin_dates_and_saved_start_end_distances(self):
+        self._login_admin()
+        other = User(name="Former Engineer", email="former@example.com", mobile="3",
+                     designation="Engineer", password_hash="test", is_active=False)
+        archived = AssignedSite(site_name="Archived Site", customer_name="Customer",
+                                address="Road", latitude=20, longitude=70, allowed_radius=100,
+                                is_active=False)
+        db.session.add_all([other, archived])
+        db.session.flush()
+        start = datetime(2026, 10, 28, 18, 30, tzinfo=timezone.utc)
+        for employee, site, at, status, distance in (
+            (self.employee, self.site, start - timedelta(microseconds=1), "completed", 1000),
+            (self.employee, self.site, start, "completed", 1112),
+            (other, archived, start + timedelta(hours=5), "report_pending", 0),
+            (self.employee, self.site, start + timedelta(days=1), "completed", 3000),
+        ):
+            db.session.add(Attendance(
+                employee_id=employee.id, site_id=site.id, checkin_time=at,
+                checkout_time=at + timedelta(hours=1), status=status,
+                checkin_lat=0, checkin_lon=0, checkin_selfie="test.png",
+                checkin_distance_m=distance, checkout_distance_m=2224 if distance else None,
+                checkout_location_source="last_known",
+            ))
+        db.session.commit()
+        params = {"from_date": "2026-10-29", "to_date": "2026-10-29"}
+        page = self.client.get("/admin/attendance", query_string=params)
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.data.count(b'class="attendance-distance"'), 2)
+        self.assertIn(b"<strong>Start:</strong> 1.112 km", page.data)
+        self.assertIn(b"2.224 km", page.data)
+        self.assertIn(b"<strong>Start:</strong> 0.000 km", page.data)
+        self.assertIn(b"Not recorded", page.data)
+        self.assertIn(b"End uses last captured location", page.data)
+        self.assertRegex(page.data.decode(), r"<th>Status</th><th>Distance from assigned site \(km\)</th><th>Location details</th>")
+        for updates in (
+            {"employee_id": str(other.id)}, {"site_id": str(archived.id)},
+            {"status": "report_pending"},
+            {"employee_id": str(other.id), "site_id": str(archived.id), "status": "report_pending"},
+        ):
+            with self.subTest(updates=updates):
+                page = self.client.get("/admin/attendance", query_string={**params, **updates})
+                self.assertEqual(page.data.count(b'class="attendance-distance"'), 1)
+                self.assertIn(b"Former Engineer</td>", page.data)
+                for name, value in updates.items():
+                    self.assertIn(f'value="{value}" selected'.encode(), page.data)
+        page = self.client.get("/admin/attendance", query_string={**params, "status": "onsite"})
+        self.assertIn(b"No attendance records match these filters.", page.data)
+        page = self.client.get("/admin/attendance?from_date=&to_date=")
+        self.assertEqual(page.data.count(b'class="attendance-distance"'), 4)
+        page = self.client.get("/admin/attendance?from_date=2026-10-29&to_date=")
+        self.assertEqual(page.data.count(b'class="attendance-distance"'), 3)
+        page = self.client.get("/admin/attendance?from_date=&to_date=2026-10-28")
+        self.assertEqual(page.data.count(b'class="attendance-distance"'), 1)
+        with patch("geosite.routes.utcnow", return_value=start + timedelta(hours=1)):
+            page = self.client.get("/admin/attendance")
+        self.assertEqual(page.data.count(b'class="attendance-distance"'), 2)
+        self.assertIn(b'value="2026-10-29"', page.data)
+        for invalid in (
+            {"employee_id": "invalid"}, {"employee_id": "999999"},
+            {"site_id": "invalid"}, {"site_id": "999999"}, {"status": "invalid"},
+            {"from_date": "2026-02-30"}, {"to_date": "invalid"},
+            {"from_date": "2026-10-30", "to_date": "2026-10-29"},
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(self.client.get("/admin/attendance", query_string={**params, **invalid}).status_code, 400)
+
+    def test_attendance_filters_apply_before_result_limit_and_report_truncation(self):
+        self._login_admin()
+        start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        for index in range(502):
+            db.session.add(Attendance(
+                employee_id=self.employee.id, site_id=self.site.id,
+                checkin_time=start + timedelta(minutes=index),
+                checkout_time=start + timedelta(minutes=index + 1),
+                status="report_pending" if index == 0 else "completed",
+                checkin_lat=0, checkin_lon=0, checkin_selfie="test.png",
+            ))
+        db.session.commit()
+        page = self.client.get("/admin/attendance?from_date=&to_date=")
+        self.assertEqual(page.data.count(b'class="attendance-distance"'), 500)
+        self.assertIn(b"Showing the latest 500 matching visits", page.data)
+        page = self.client.get("/admin/attendance?from_date=&to_date=&status=report_pending")
+        self.assertEqual(page.data.count(b'class="attendance-distance"'), 1)
+        self.assertNotIn(b"Showing the latest 500 matching visits", page.data)
 
     def test_admin_live_status_and_excel(self):
         self.client.post(

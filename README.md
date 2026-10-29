@@ -65,12 +65,40 @@ hours** for each visit. GPS coordinates, capture times and distance/source detai
 are available under each row's **Location details** disclosure. Visit duration is
 elapsed check-in-to-check-out time, not verified time within the site boundary;
 active durations are calculated at page load. No employee-wide total is added.
+Attendance filters support employee (including inactive accounts), site (including
+archived sites), status and inclusive IST check-in dates. Dates default to today;
+**All history** clears the filters, and either date can be cleared for an
+open-ended range. Filtering happens before the latest-500-results limit; a notice
+appears when more matches exist. Access logs are not filtered.
+Between Status and Location details, **Distance from assigned site (km)** shows
+the recorded Start and End distances to three decimal places. Missing historical
+distances say Not recorded, active visits say End: Not stopped, and last-known
+stop locations are identified. Distances use the saved visit measurements, not
+recalculation against a subsequently edited site.
 
 Site activity Excel downloads contain one row per IST date for the selected site
 and employee. Multiple activity records for a date appear on separate lines in
 the same Activity detail cell, with at most one billable day per date. Leave
 notes for that date share that cell. Template columns and merged activity cells
 are retained; row heights expand for longer multiline activity text.
+
+## Employee login greeting
+
+After a successful employee login, a lightweight animated robot welcomes the
+employee by first name and reveals the dashboard as soon as the spoken greeting
+finishes. If speech is unavailable, blocked, or fails, a four-second fallback
+reveals the dashboard; a 20-second safety timeout handles stalled speech. Skip or
+Escape dismisses it immediately. Admin logins and ordinary dashboard reloads
+do not trigger it. A per-employee local preference limits it to once per IST day
+in that browser/Android WebView; another device or cleared browser storage can
+show it again. If storage is blocked, the greeting explains that it may repeat.
+Reduced-motion settings disable the robot animation. JavaScript-disabled or
+older browsers without dialog support go directly to the usable dashboard.
+
+Device/browser speech synthesis attempts the English greeting; **Play voice**
+retries when automatic audio is blocked. Voice availability varies by device,
+and text/Skip remain usable without it. No external API key or video download is
+required. The selected speech engine may use its own online services.
 
 ## Employee report voice typing
 
@@ -362,6 +390,8 @@ merged cells, row heights, column widths, static text and Excel printer settings
 Keep this worksheet first, headers in rows 1-8, activity columns A-E (detail
 merged across E-L), and a `REMARKS` label in column A below the activity rows.
 Keep the five remarks rows and totals/customer/sign-off section below that label.
+The supplied template centers its dark-filled, white-text headings horizontally
+and vertically.
 Unused activity rows remain blank so short reports retain your exact layout.
 If more activities are needed than the template allows, matching rows are added
 before `REMARKS` and the footer and print area move down. Activity-row heights
@@ -382,7 +412,8 @@ export their own historical activity but cannot start new visits there.
 
 Each date keeps one activity row; each visit's activity starts on a new line in
 the same merged activity cell. The day counts as 1 if any visit is billable,
-otherwise 0, irrespective of how many visits occurred. Approved leave
+otherwise 0, irrespective of how many visits occurred. Non-billable activities
+retain their entered text without an automatically added billing label. Approved leave
 is 0 with the employee's reason (including half-day labels); pending/rejected
 leave is excluded. Leave is employee-wide and appears even if a visit also exists
 that date. Empty dates show 0 and **Sunday** on Sundays or **No activity recorded**
