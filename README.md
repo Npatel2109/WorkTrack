@@ -85,7 +85,7 @@ For password reset emails, an administrator can open **Settings ? Email (passwor
 - The engineer picker is a scrollable radio list with name/email search and wrapping text, avoiding clipped native dropdown options on desktop and Android.
 - Completed report review, PDF download, Excel export, selfie viewing, attendance history, and account access audit log
 - **Submitted reports**: read-only access to all employee-uploaded reports, their dates/manual man-days, complete change history, and downloads of current and previous PDF versions
-- Clickable dashboard totals that open their matching employee/site/visit/report lists
+- Clickable Operations dashboard totals for employees, assigned sites, currently onsite, pending leave requests and employees on leave today. Completed-today and report-submitted/pending cards are not displayed; reports and attendance history remain available through their existing pages.
 - Invoice generation with an explicit engineer/site selection, required service dates, editable billable days, daily rate, currency, customer, and description. Optional **PO number** and **PO date** are manually entered on invoices only. Amount is calculated as `billable days × daily rate`.
 - Invoice PDFs and invoice history; invoices preserve the employee/site details if assignments later change
 

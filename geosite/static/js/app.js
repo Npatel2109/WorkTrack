@@ -213,8 +213,6 @@
           body.replaceChildren(fragment);
           const onsite = document.getElementById("onsite-stat");
           if (onsite) onsite.textContent = data.onsite_count;
-          const pendingReports = document.getElementById("pending-report-stat");
-          if (pendingReports) pendingReports.textContent = data.pending_report_count;
           const pendingLeave = document.getElementById("pending-leave-stat");
           if (pendingLeave) pendingLeave.textContent = data.pending_leave_count;
           const onLeave = document.getElementById("on-leave-stat");

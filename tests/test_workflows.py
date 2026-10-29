@@ -1306,8 +1306,15 @@ class WorkflowTests(unittest.TestCase):
             data={"email": self.admin.email, "password": "admin-password-123"},
         )
         dashboard = self.client.get("/admin")
-        self.assertIn(b"/admin/metrics/employees", dashboard.data)
-        for metric in ("employees", "sites", "onsite", "completed", "reports"):
+        for label in (b"Completed today", b"Reports submitted", b"Reports pending"):
+            self.assertNotIn(label, dashboard.data)
+        for metric in ("employees", "sites", "onsite"):
+            self.assertIn(f"/admin/metrics/{metric}".encode(), dashboard.data)
+        for metric in ("completed", "reports", "pending-reports"):
+            self.assertNotIn(f"/admin/metrics/{metric}".encode(), dashboard.data)
+        self.assertIn(b"Pending leave requests", dashboard.data)
+        self.assertIn(b"On leave today", dashboard.data)
+        for metric in ("employees", "sites", "onsite", "completed", "reports", "pending-reports"):
             with self.subTest(metric=metric):
                 self.assertEqual(self.client.get(f"/admin/metrics/{metric}").status_code, 200)
 

@@ -330,6 +330,36 @@ class SubmittedReportTests(unittest.TestCase):
         self.assertEqual(self.submit().status_code, 413)
         self.assertEqual(SubmittedReportVersion.query.count(), 1)
 
+    def test_actual_five_mb_pdf_is_accepted_for_submission_and_replacement(self):
+        self.login(self.employee)
+        limit = 5 * 1024 * 1024
+        prefix, suffix = self.pdf_bytes().rsplit(b"startxref", 1)
+        # A comment before startxref leaves the PDF's existing object offsets valid.
+        padding = limit - len(prefix) - len(b"%\nstartxref") - len(suffix)
+        raw = prefix + b"%" + b" " * padding + b"\nstartxref" + suffix
+        self.assertEqual(len(raw), limit)
+
+        self.assertEqual(self.submit(pdf=(io.BytesIO(raw), "full-size.pdf")).status_code, 302)
+        report = SubmittedReport.query.one()
+        self.assertEqual(Path(self.uploads.name, report.current_version.filename).read_bytes(), raw)
+        self.assertEqual(
+            self.edit(report, pdf=(io.BytesIO(raw), "replacement.pdf")).status_code, 302
+        )
+        db.session.refresh(report)
+        self.assertEqual(report.revision_number, 2)
+        self.assertEqual(Path(self.uploads.name, report.current_version.filename).read_bytes(), raw)
+
+        for upload in (
+            lambda: self.submit(pdf=(io.BytesIO(raw + b"\n"), "oversized.pdf")),
+            lambda: self.edit(report, pdf=(io.BytesIO(raw + b"\n"), "oversized.pdf")),
+        ):
+            response = upload()
+            self.assertEqual(response.status_code, 400)
+            self.assertIn(b"exceeds the 5 MB", response.data)
+        self.assertEqual(SubmittedReport.query.count(), 1)
+        self.assertEqual(SubmittedReportVersion.query.count(), 2)
+        self.assertEqual(len(list(Path(self.uploads.name).iterdir())), 2)
+
     def test_invalid_replacement_does_not_modify_saved_submission(self):
         self.login(self.employee)
         self.submit()

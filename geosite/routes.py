@@ -656,9 +656,6 @@ def logout():
 def admin_dashboard():
     today = india_date(utcnow())
     rows = _live_rows(today)
-    completed_today = _date_filtered(
-        Attendance.query.filter_by(status="completed"), today, today, INDIA_TIME
-    ).count()
     week_start = today - timedelta(days=6)
     visits = _date_filtered(
         Attendance.query.filter_by(status="completed"), week_start, today, INDIA_TIME
@@ -673,9 +670,6 @@ def admin_dashboard():
         employee_count=User.query.filter_by(role="employee").count(),
         site_count=AssignedSite.query.filter_by(is_active=True).count(),
         onsite_count=Attendance.query.filter_by(status="onsite").count(),
-        pending_report_count=Attendance.query.filter_by(status="report_pending").count(),
-        completed_today=completed_today,
-        report_count=SiteReport.query.count(),
         live_rows=rows,
         map_sites=AssignedSite.query.filter_by(is_active=True).order_by(AssignedSite.site_name).all(),
         chart_labels=labels,

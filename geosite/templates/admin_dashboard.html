@@ -6,13 +6,10 @@
   {% for label, value, icon, tone, metric in [
     ('Total employees', employee_count, '01', 'blue', 'employees'),
     ('Assigned sites', site_count, '02', 'purple', 'sites'),
-    ('Currently onsite', onsite_count, '03', 'green', 'onsite'),
-    ('Completed today', completed_today, '04', 'orange', 'completed'),
-    ('Reports submitted', report_count, '05', 'slate', 'reports'),
-    ('Reports pending', pending_report_count, '08', 'orange', 'pending-reports')
+    ('Currently onsite', onsite_count, '03', 'green', 'onsite')
   ] %}
   <div class="col-6 col-xl"><a class="stat-card stat-card-link" href="{{ url_for('main.admin_metric', metric=metric) }}">
-    <div class="stat-icon {{ tone }}">{{ icon }}</div><div class="stat-label">{{ label }}</div><div class="stat-value" {% if metric == 'onsite' %}id="onsite-stat"{% elif metric == 'pending-reports' %}id="pending-report-stat"{% endif %}>{{ value }}</div>
+    <div class="stat-icon {{ tone }}">{{ icon }}</div><div class="stat-label">{{ label }}</div><div class="stat-value" {% if metric == 'onsite' %}id="onsite-stat"{% endif %}>{{ value }}</div>
   </a></div>
   {% endfor %}
   {% for label, value, icon, tone, filter, identifier in [
