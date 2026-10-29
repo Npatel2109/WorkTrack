@@ -9,45 +9,23 @@
     passwordToggle.setAttribute("aria-pressed", String(visible));
   });
   const themeButton = document.getElementById("theme-toggle");
-  if (localStorage.getItem("geosite-theme") === "dark") {
-    document.documentElement.dataset.theme = "dark";
-  }
+  const updateThemeButton = () => {
+    const dark = document.documentElement.dataset.theme === "dark";
+    themeButton?.setAttribute("aria-pressed", String(dark));
+    themeButton?.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+  };
+  updateThemeButton();
   themeButton?.addEventListener("click", () => {
     const dark = document.documentElement.dataset.theme !== "dark";
     document.documentElement.dataset.theme = dark ? "dark" : "light";
-    localStorage.setItem("geosite-theme", dark ? "dark" : "light");
+    document.documentElement.dataset.bsTheme = dark ? "dark" : "light";
+    updateThemeButton();
+    try {
+      localStorage.setItem("geosite-theme", dark ? "dark" : "light");
+    } catch (error) { console.warn("Theme preference could not be saved.", error); }
   });
 
   window.GeoSite = {
-    renderDashboardChart() {
-      const canvas = document.getElementById("completion-chart");
-      if (!canvas || !window.Chart) return;
-      const labels = JSON.parse(document.getElementById("chart-labels").textContent);
-      const values = JSON.parse(document.getElementById("chart-values").textContent);
-      new Chart(canvas, {
-        type: "bar",
-        data: {
-          labels: labels.map((value) =>
-            new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { weekday: "short" })
-          ),
-          datasets: [{
-            label: "Completed visits",
-            data: values,
-            backgroundColor: "#3868ee",
-            borderRadius: 7,
-            maxBarThickness: 32,
-          }],
-        },
-        options: {
-          responsive: true,
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { grid: { display: false } },
-            y: { beginAtZero: true, ticks: { precision: 0 } },
-          },
-        },
-      });
-    },
     renderSiteMap() {
       const element = document.getElementById("live-map");
       if (!element || !window.L) return;
@@ -192,19 +170,21 @@
             }
             const time = document.createElement("td");
             time.textContent = employee.checkin_time || "—";
+            const duration = document.createElement("td");
+            duration.textContent = employee.onsite_hours;
             const state = document.createElement("td");
             const pill = document.createElement("span");
             pill.className = `status-pill ${employee.status}`;
             const label = employee.status.replaceAll("-", " ");
             pill.textContent = label[0].toUpperCase() + label.slice(1);
             state.append(pill);
-            row.append(employeeCell, dailyStatusCell, siteCell, time, state);
+            row.append(employeeCell, dailyStatusCell, siteCell, time, duration, state);
             fragment.append(row);
           }
           if (!data.employees.length) {
             const row = document.createElement("tr");
             const cell = document.createElement("td");
-            cell.colSpan = 5;
+            cell.colSpan = 6;
             cell.className = "empty-state";
             cell.textContent = "No employees have been added yet.";
             row.append(cell);

@@ -886,7 +886,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/admin/live-status").json["employees"][0]["checkin_time"], expected)
         self.assertIn(b"IST", self.client.get("/admin/metrics/onsite").data)
 
-    def test_completed_today_counts_and_chart_use_exact_ist_midnight_boundaries(self):
+    def test_completed_metric_uses_exact_ist_midnight_boundaries(self):
         midnight = datetime(2026, 10, 26, 18, 30, tzinfo=timezone.utc)
         for stopped_at in (
             midnight - timedelta(microseconds=1),
@@ -901,10 +901,9 @@ class WorkflowTests(unittest.TestCase):
                 response = self.client.get("/admin")
                 self.assertEqual(response.status_code, 200)
                 values = render.call_args.kwargs
-                self.assertEqual(values["completed_today"], 2)
-                self.assertEqual(values["chart_labels"][-1], "2026-10-27")
-                self.assertEqual(values["chart_values"][-1], 2)
-                self.assertEqual(values["chart_values"][-2], 1)
+                self.assertNotIn("completed_today", values)
+                self.assertNotIn("chart_labels", values)
+                self.assertNotIn("chart_values", values)
             with patch("geosite.routes.render_template", return_value="metric") as render:
                 self.client.get("/admin/metrics/completed")
                 self.assertEqual(len(render.call_args.kwargs["rows"]), 2)
@@ -1306,6 +1305,9 @@ class WorkflowTests(unittest.TestCase):
             data={"email": self.admin.email, "password": "admin-password-123"},
         )
         dashboard = self.client.get("/admin")
+        self.assertNotIn(b"completion-chart", dashboard.data)
+        self.assertNotIn(b"chart.js", dashboard.data)
+        self.assertIn(b'id="live-map"', dashboard.data)
         for label in (b"Completed today", b"Reports submitted", b"Reports pending"):
             self.assertNotIn(label, dashboard.data)
         for metric in ("employees", "sites", "onsite"):
@@ -1333,6 +1335,43 @@ class WorkflowTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
+
+    def test_workspace_navigation_is_role_scoped_and_marks_current_page(self):
+        guest = self.client.get("/login")
+        self.assertNotIn(b'id="workspaceNav"', guest.data)
+        self.assertIn(b'href="#main-content"', guest.data)
+        self._login_employee()
+        for path, current in (
+            ("/employee", "My dashboard"),
+            ("/employee/leaves", "My leave"),
+            ("/reports", "My reports"),
+            ("/submitted-reports", "Submitted reports"),
+            ("/employee/submitted-reports/new", "Submitted reports"),
+        ):
+            with self.subTest(path=path):
+                page = self.client.get(path)
+                self.assertEqual(page.status_code, 200)
+                self.assertIn(b'aria-label="Quick navigation"', page.data)
+                self.assertIn(b'aria-controls="workspaceNav"', page.data)
+                self.assertNotIn(b'href="/admin/employees"', page.data)
+                self.assertRegex(
+                    page.data.decode(),
+                    rf'(?s)class="workspace-link active"[^>]+aria-current="page".*?<span>{current}</span>',
+                )
+        self.client.post("/logout")
+        self.client.post("/login", data={
+            "email": self.admin.email, "password": "admin-password-123",
+        })
+        page = self.client.get("/admin")
+        self.assertIn(b'aria-label="Main navigation"', page.data)
+        self.assertIn(b'href="/admin/employees"', page.data)
+        self.assertNotIn(b'aria-label="Quick navigation"', page.data)
+        self.assertRegex(
+            page.data.decode(),
+            r'(?s)class="workspace-link active"[^>]+aria-current="page".*?<span>Dashboard</span>',
+        )
+        live = self.client.get("/api/admin/live-status").get_json()
+        self.assertIn("onsite_hours", live["employees"][0])
 
     def test_admin_live_status_and_excel(self):
         self.client.post(

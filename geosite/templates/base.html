@@ -5,54 +5,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}GeoSite{% endblock %} · GeoSite Attendance</title>
+  <script>
+    try {
+      const theme = localStorage.getItem("geosite-theme") === "dark" ? "dark" : "light";
+      document.documentElement.dataset.theme = theme;
+      document.documentElement.dataset.bsTheme = theme;
+    } catch (error) { console.warn("Theme preference is unavailable.", error); }
+  </script>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet">
-  <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/app.css', v='20261029') }}" rel="stylesheet">
   {% block head %}{% endblock %}
 </head>
-<body>
-  <nav class="navbar navbar-expand-lg navbar-dark app-navbar">
-    <div class="container-fluid px-lg-4">
-      <a class="navbar-brand fw-bold" href="{{ url_for('main.index') }}">{% set brand_symbol_class = "brand-mark" %}{% include "_brand_symbol.html" %} GeoSite</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon"></span>
-      </button>
-      <div class="collapse navbar-collapse" id="mainNav">
-        {% if current_user.is_authenticated %}
-        <div class="navbar-nav me-auto">
-          {% if current_user.is_admin %}
-          <a class="nav-link" href="{{ url_for('main.admin_dashboard') }}">Dashboard</a>
-          <a class="nav-link" href="{{ url_for('main.employees') }}">Employees</a>
-          <a class="nav-link" href="{{ url_for('main.sites') }}">Project</a>
-          <a class="nav-link" href="{{ url_for('main.projects') }}">Projects</a>
-          <a class="nav-link" href="{{ url_for('main.site_assignments') }}">Assign sites</a>
-          <a class="nav-link" href="{{ url_for('main.reports') }}">Reports</a>
-          <a class="nav-link" href="{{ url_for('main.submitted_reports') }}">Submitted reports</a>
-          <a class="nav-link" href="{{ url_for('main.invoices') }}">Invoices</a>
-          <a class="nav-link" href="{{ url_for('main.attendance_history') }}">Attendance</a>
-          <a class="nav-link" href="{{ url_for('main.admin_leaves') }}">Leave</a>
-          <a class="nav-link" href="{{ url_for('main.admin_work_status') }}">Work confirmations</a>
-          <a class="nav-link" href="{{ url_for('main.app_settings') }}">Settings</a>
-          {% else %}
-          <a class="nav-link" href="{{ url_for('main.employee_dashboard') }}">My dashboard</a>
-          <a class="nav-link" href="{{ url_for('main.employee_leaves') }}">My leave</a>
-          <a class="nav-link" href="{{ url_for('main.reports') }}">My reports</a>
-          <a class="nav-link" href="{{ url_for('main.submitted_reports') }}">Submitted reports</a>
-          {% endif %}
-        </div>
-        <div class="d-flex align-items-center gap-3 text-white">
-          <button class="btn btn-sm btn-outline-light" id="theme-toggle" type="button" aria-label="Toggle dark mode">◐</button>
-          <span class="small d-none d-sm-inline">{{ current_user.name }}</span>
-          <form method="post" action="{{ url_for('main.logout') }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button class="btn btn-sm btn-light" type="submit">Sign out</button>
-          </form>
-        </div>
-        {% endif %}
-      </div>
-    </div>
-  </nav>
-  <main class="container-fluid px-3 px-lg-4 py-4">
+<body class="{% if current_user.is_authenticated %}workspace{% if not current_user.is_admin %} employee-workspace{% endif %}{% else %}guest-workspace{% endif %}">
+  {% from "_icons.html" import icon %}
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  {% if current_user.is_authenticated %}{% include "_navigation.html" %}{% endif %}
+  <div class="workspace-main">
+    <header class="workspace-topbar">
+      {% if current_user.is_authenticated %}
+      <div class="topbar-context"><button class="icon-button d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#workspaceNav" aria-controls="workspaceNav" aria-label="Open navigation">{{ icon("menu") }}</button><span class="workspace-tag">{{ icon("grid" if current_user.is_admin else "pin") }} {{ "Admin workspace" if current_user.is_admin else "My workspace" }}</span></div>
+      {% else %}
+      <a class="workspace-brand" href="{{ url_for('main.index') }}">{% set brand_symbol_class = "brand-mark" %}{% include "_brand_symbol.html" %} GeoSite</a>
+      {% endif %}
+      <div class="topbar-actions"><button class="icon-button" id="theme-toggle" type="button" aria-label="Toggle dark mode" aria-pressed="false">{{ icon("moon") }}</button>{% if current_user.is_authenticated %}<span class="user-avatar topbar-avatar" aria-label="{{ current_user.name }}">{{ current_user.name[:1]|upper }}</span>{% endif %}</div>
+    </header>
+  <main class="container-fluid workspace-content px-3 px-lg-4 py-4" id="main-content" tabindex="-1">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for category, message in messages %}
       <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
@@ -65,10 +43,19 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
-  <footer class="container-fluid px-4 py-3 text-center small text-secondary">GeoSite Attendance &amp; Site Report Management · {{ current_year }}</footer>
+  <footer class="workspace-footer">GeoSite <span aria-hidden="true">&middot;</span> A better-connected workday <span aria-hidden="true">&middot;</span> {{ current_year }}</footer>
+  </div>
+  {% if current_user.is_authenticated and not current_user.is_admin %}
+  <nav class="mobile-dock" aria-label="Quick navigation">
+    {% for endpoint, label, symbol in [("employee_dashboard", "Home", "home"), ("employee_leaves", "Leave", "calendar"), ("reports", "Reports", "report"), ("submitted_reports", "PDFs", "upload")] %}
+    {% set active = request.endpoint == "main." ~ endpoint or (endpoint == "submitted_reports" and request.endpoint in ["main.submitted_report_form", "main.submitted_report_detail"]) or (endpoint == "employee_dashboard" and request.endpoint in ["main.checkin_location", "main.checkin_camera", "main.checkout_location", "main.site_report_form"]) %}
+    <a href="{{ url_for('main.' ~ endpoint) }}"{% if active %} class="active" aria-current="page"{% endif %}>{{ icon(symbol) }}<span>{{ label }}</span></a>
+    {% endfor %}
+  </nav>
+  {% endif %}
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='20261029') }}"></script>
   {% if tracking_attendance %}<script src="{{ url_for('static', filename='js/location-tracking.js') }}"></script>{% endif %}
   {% block scripts %}{% endblock %}
 </body>

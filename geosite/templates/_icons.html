@@ -1,0 +1,24 @@
+{% macro icon(name, class_name="") -%}
+{% set paths = {
+  "home": "M3 10 12 3l9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z",
+  "grid": "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
+  "people": "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M16 3a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.87 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0",
+  "pin": "M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0Z M15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
+  "folder": "M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z",
+  "assign": "M9 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4 M16 3h5v5 M10 14 21 3",
+  "report": "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z M14 2v6h6 M8 13h8 M8 17h5",
+  "upload": "M12 16V3 M7 8l5-5 5 5 M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4",
+  "invoice": "M6 3h12v18l-3-2-3 2-3-2-3 2Z M9 7h6 M9 11h6 M9 15h3",
+  "clock": "M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0 M12 6v6l4 2",
+  "calendar": "M8 2v4 M16 2v4 M3 10h18 M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2 M8 14h2 M14 14h2",
+  "check": "m7 12 3 3 7-7 M22 12a10 10 0 1 1-6-9.17",
+  "settings": "M4 6h7 M15 6h5 M4 12h3 M11 12h9 M4 18h11 M19 18h1 M11 3v6 M7 9v6 M15 15v6",
+  "arrow": "M5 12h14 m-5-5 5 5-5 5",
+  "download": "M12 3v12 m-5-5 5 5 5-5 M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4",
+  "menu": "M4 6h16 M4 12h16 M4 18h16",
+  "moon": "M21 13A9 9 0 0 1 11 3a9 9 0 1 0 10 10Z",
+  "logout": "M9 21H4V3h5 M9 12h12 m-5-5 5 5-5 5",
+  "spark": "m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z"
+} %}
+<svg class="app-icon {{ class_name }}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="{{ paths[name] }}"/></svg>
+{%- endmacro %}

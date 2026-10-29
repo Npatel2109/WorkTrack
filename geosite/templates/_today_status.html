@@ -1,5 +1,5 @@
-<section class="panel-card mb-4" id="today-work-status">
-  <div class="section-title"><div><p class="eyebrow">DAILY ATTENDANCE</p><h2>Today's Work Status</h2></div><span class="small text-nowrap">{{ today.strftime("%d %b %Y") }} IST</span></div>
+<section class="panel-card daily-status-panel mb-4" id="today-work-status">
+  <div class="section-title"><div><p class="eyebrow">MAKE TODAY COUNT</p><h2>Today's Work Status</h2></div><span class="date-chip">{{ today.strftime("%d %b %Y") }} IST</span></div>
   {% if approved_today %}
   <div class="alert alert-info" id="today-approved-leave">
     <strong>{{ "On leave - approved full day" if full_day_leave else "Approved half-day leave" }}</strong>

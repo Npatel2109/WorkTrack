@@ -2,6 +2,19 @@
 
 A responsive Flask application for employee site assignments, GPS-recorded attendance, live selfie capture, signed visit reports, PDF generation, Excel exports, and administrator audit/history views.
 
+## Workspace experience
+
+Admin and employee pages share a purple/blue design with grouped desktop sidebar
+navigation, an accessible mobile drawer, active-page indicators and light/dark
+themes. Employees also have mobile quick navigation for Home, Leave, Reports and
+PDF submissions. Their dashboard puts daily attendance first, with shortcuts to
+leave requests, PDF upload and report history. Admin dashboards retain live team
+status, the assigned-site map, quick actions and the five existing overview totals.
+The completed-visits graph is not displayed. Forms, tables and
+visit workflows share the updated styling without changing permissions or data.
+Keyboard focus, skip navigation and reduced-motion preferences are supported.
+No database migration or additional dependencies are needed for this UI refresh.
+
 ## Requirements
 
 - Python 3.10+

@@ -1,0 +1,42 @@
+{% from "_icons.html" import icon %}
+{% macro nav_item(endpoint, label, symbol, related=[]) -%}
+{% set active = request.endpoint == "main." ~ endpoint or request.endpoint in related %}
+<a class="workspace-link{% if active %} active{% endif %}" href="{{ url_for('main.' ~ endpoint) }}"{% if active %} aria-current="page"{% endif %}>{{ icon(symbol) }}<span>{{ label }}</span></a>
+{%- endmacro %}
+<aside class="offcanvas-lg offcanvas-start workspace-sidebar" tabindex="-1" id="workspaceNav" aria-labelledby="workspace-nav-title">
+  <div class="sidebar-brand">
+    <a class="workspace-brand" href="{{ url_for('main.index') }}">{% set brand_symbol_class = "brand-mark" %}{% include "_brand_symbol.html" %}<span id="workspace-nav-title">GeoSite<span class="brand-caption">Your work. Connected.</span></span></a>
+    <button class="btn-close d-lg-none" type="button" data-bs-dismiss="offcanvas" data-bs-target="#workspaceNav" aria-label="Close navigation"></button>
+  </div>
+  <div class="sidebar-body">
+    <nav aria-label="Main navigation">
+      <p class="nav-group-label">Workspace</p>
+      {% if current_user.is_admin %}
+      {{ nav_item("admin_dashboard", "Dashboard", "grid") }}
+      {{ nav_item("employees", "Employees", "people") }}
+      {{ nav_item("sites", "Project", "pin", ["main.site_report_details"]) }}
+      {{ nav_item("projects", "Projects", "folder") }}
+      {{ nav_item("site_assignments", "Assign sites", "assign") }}
+      <p class="nav-group-label">Activity &amp; insights</p>
+      {{ nav_item("reports", "Reports", "report") }}
+      {{ nav_item("submitted_reports", "Submitted reports", "upload", ["main.submitted_report_detail"]) }}
+      {{ nav_item("invoices", "Invoices", "invoice") }}
+      {{ nav_item("attendance_history", "Attendance", "clock") }}
+      {{ nav_item("admin_leaves", "Leave", "calendar", ["main.admin_leave_form"]) }}
+      {{ nav_item("admin_work_status", "Work confirmations", "check", ["main.edit_work_status"]) }}
+      <p class="nav-group-label">Manage</p>
+      {{ nav_item("app_settings", "Settings", "settings") }}
+      {% else %}
+      {{ nav_item("employee_dashboard", "My dashboard", "home", ["main.checkin_location", "main.checkin_camera", "main.checkout_location", "main.site_report_form"]) }}
+      {{ nav_item("employee_leaves", "My leave", "calendar") }}
+      {{ nav_item("reports", "My reports", "report") }}
+      {{ nav_item("submitted_reports", "Submitted reports", "upload", ["main.submitted_report_form", "main.submitted_report_detail"]) }}
+      <div class="sidebar-tip">{{ icon("spark") }}<strong>A smoother workday.</strong><p>Keep your status up to date and your reports in one place.</p></div>
+      {% endif %}
+    </nav>
+  </div>
+  <div class="sidebar-account">
+    <div class="account-identity"><span class="user-avatar">{{ current_user.name[:1]|upper }}</span><div><strong>{{ current_user.name }}</strong><span>{{ "Administrator" if current_user.is_admin else "Field engineer" }}</span></div></div>
+    <form method="post" action="{{ url_for('main.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="workspace-signout" type="submit">{{ icon("logout") }} Sign out</button></form>
+  </div>
+</aside>

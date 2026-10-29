@@ -1,23 +1,27 @@
 {% extends "base.html" %}
 {% block title %}Admin dashboard{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">OVERVIEW</p><h1>Operations dashboard</h1><p class="text-secondary mb-0">Today's attendance and site activity at a glance.</p></div><a class="btn btn-outline-primary" href="{{ url_for('main.export_excel') }}">Export Excel</a></div>
+{% from "_icons.html" import icon %}
+<section class="page-heading dashboard-hero">
+  <div class="hero-copy"><p class="eyebrow">{{ icon("spark") }} THE BIG PICTURE</p><h1>Operations dashboard<span class="hero-heading-dot">.</span></h1><p>Your people, projects and progress. All in sync.</p><div class="hero-meta"><span>{{ icon("people") }} Team overview</span><span>Attendance &amp; site activity</span></div></div>
+  <a class="btn hero-button" href="{{ url_for('main.export_excel') }}">{{ icon("download") }} Export Excel {{ icon("arrow") }}</a>
+</section>
 <div class="row g-3 mb-4">
-  {% for label, value, icon, tone, metric in [
-    ('Total employees', employee_count, '01', 'blue', 'employees'),
-    ('Assigned sites', site_count, '02', 'purple', 'sites'),
-    ('Currently onsite', onsite_count, '03', 'green', 'onsite')
+  {% for label, value, symbol, tone, metric in [
+    ('Total employees', employee_count, 'people', 'blue', 'employees'),
+    ('Assigned sites', site_count, 'pin', 'purple', 'sites'),
+    ('Currently onsite', onsite_count, 'clock', 'green', 'onsite')
   ] %}
   <div class="col-6 col-xl"><a class="stat-card stat-card-link" href="{{ url_for('main.admin_metric', metric=metric) }}">
-    <div class="stat-icon {{ tone }}">{{ icon }}</div><div class="stat-label">{{ label }}</div><div class="stat-value" {% if metric == 'onsite' %}id="onsite-stat"{% endif %}>{{ value }}</div>
+    <div class="stat-icon {{ tone }}">{{ icon(symbol) }}</div><div class="stat-label">{{ label }}</div><div class="stat-value" {% if metric == 'onsite' %}id="onsite-stat"{% endif %}>{{ value }}</div><span class="stat-arrow" aria-hidden="true">&nearr;</span>
   </a></div>
   {% endfor %}
-  {% for label, value, icon, tone, filter, identifier in [
-    ('Pending leave requests', pending_leave_count, '06', 'orange', 'pending', 'pending-leave-stat'),
-    ('On leave today', on_leave_count, '07', 'purple', 'today', 'on-leave-stat')
+  {% for label, value, symbol, tone, filter, identifier in [
+    ('Pending leave requests', pending_leave_count, 'calendar', 'orange', 'pending', 'pending-leave-stat'),
+    ('On leave today', on_leave_count, 'calendar', 'purple', 'today', 'on-leave-stat')
   ] %}
   <div class="col-6 col-xl"><a class="stat-card stat-card-link" href="{{ url_for('main.admin_leaves', status=filter) }}">
-    <div class="stat-icon {{ tone }}">{{ icon }}</div><div class="stat-label">{{ label }}</div><div class="stat-value" id="{{ identifier }}">{{ value }}</div>
+    <div class="stat-icon {{ tone }}">{{ icon(symbol) }}</div><div class="stat-label">{{ label }}</div><div class="stat-value" id="{{ identifier }}">{{ value }}</div><span class="stat-arrow" aria-hidden="true">&nearr;</span>
   </a></div>
   {% endfor %}
 </div>
@@ -33,7 +37,7 @@
             <td>{{ row.sites|map(attribute="site_name")|join(", ") if row.sites else "No site assigned" }}{% if row.sites %}<div class="small text-secondary">{{ row.sites|map(attribute="customer_name")|unique|join(", ") }}</div>{% endif %}</td>
             <td>{{ row.attendance.checkin_time|ist("%H:%M IST") if row.attendance else "—" }}</td><td>{{ row.onsite_hours }}</td><td><span class="status-pill {{ row.status }}">{{ row.status|replace('-', ' ')|title }}</span></td>
           </tr>
-        {% else %}<tr><td colspan="5" class="empty-state">No employees have been added yet.</td></tr>{% endfor %}</tbody>
+        {% else %}<tr><td colspan="6" class="empty-state">No employees have been added yet.</td></tr>{% endfor %}</tbody>
       </table></div>
     </section>
     <section class="panel-card mt-4"><div class="section-title"><div><p class="eyebrow">FIELD TEAMS</p><h2>Assigned site map</h2></div></div>
@@ -44,12 +48,7 @@
     </section>
   </div>
   <div class="col-xl-4">
-    <section class="panel-card"><div class="section-title"><div><p class="eyebrow">LAST 7 DAYS</p><h2>Completed visits</h2></div></div>
-      <canvas id="completion-chart" height="230" aria-label="Completed visit chart"></canvas>
-      <script type="application/json" id="chart-labels">{{ chart_labels|tojson }}</script>
-      <script type="application/json" id="chart-values">{{ chart_values|tojson }}</script>
-    </section>
-    <section class="panel-card mt-4 quick-links"><p class="eyebrow">QUICK ACTIONS</p>
+    <section class="panel-card quick-links"><p class="eyebrow">QUICK ACTIONS</p>
       <a href="{{ url_for('main.employees') }}">Add or manage employees <span>→</span></a>
       <a href="{{ url_for('main.sites') }}">Manage project sites <span>→</span></a>
       <a href="{{ url_for('main.site_assignments') }}">Assign sites to engineers <span>→</span></a>
@@ -62,6 +61,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-<script>GeoSite.renderDashboardChart(); GeoSite.renderSiteMap(); GeoSite.startLiveStatusUpdates();</script>
+<script>GeoSite.renderSiteMap(); GeoSite.startLiveStatusUpdates();</script>
 {% endblock %}

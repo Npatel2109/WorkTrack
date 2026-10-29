@@ -656,15 +656,6 @@ def logout():
 def admin_dashboard():
     today = india_date(utcnow())
     rows = _live_rows(today)
-    week_start = today - timedelta(days=6)
-    visits = _date_filtered(
-        Attendance.query.filter_by(status="completed"), week_start, today, INDIA_TIME
-    ).with_entities(Attendance.checkout_time).all()
-    counts = {}
-    for (checkout_time,) in visits:
-        day = india_date(checkout_time).isoformat()
-        counts[day] = counts.get(day, 0) + 1
-    labels = [(week_start + timedelta(days=offset)).isoformat() for offset in range(7)]
     return render_template(
         "admin_dashboard.html",
         employee_count=User.query.filter_by(role="employee").count(),
@@ -672,8 +663,6 @@ def admin_dashboard():
         onsite_count=Attendance.query.filter_by(status="onsite").count(),
         live_rows=rows,
         map_sites=AssignedSite.query.filter_by(is_active=True).order_by(AssignedSite.site_name).all(),
-        chart_labels=labels,
-        chart_values=[counts.get(day, 0) for day in labels],
         **_leave_counts(india_date(utcnow())),
     )
 
@@ -778,6 +767,7 @@ def live_status():
                 "checkin_time": format_ist(row["attendance"].checkin_time, "%H:%M IST")
                 if row["attendance"]
                 else None,
+                "onsite_hours": row["onsite_hours"],
                 "status": row["status"],
                 "daily_statuses": row["daily_statuses"],
             }
