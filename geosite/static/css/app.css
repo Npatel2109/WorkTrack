@@ -230,10 +230,20 @@ html[data-theme="dark"] .bg-body-tertiary { background-color: #152136 !important
 .guest-workspace .login-card { box-shadow: 0 20px 70px #3725670d !important; }
 .guest-workspace .login-shell { min-height: calc(100dvh - 170px); }
 @media (min-width: 992px) {
-  .workspace-sidebar { position: fixed; inset: 0 auto 0 0; display: flex; flex-direction: column; height: 100dvh; z-index: 1030; }
-  .workspace .workspace-main { margin-left: 252px; }
+  .workspace-sidebar.offcanvas-lg { position: fixed; inset: 0 auto 0 0; display: flex; flex-direction: column; height: 100dvh; z-index: 1030; }
+  .employee-workspace .workspace-main { margin-left: 252px; }
   .workspace-content { padding: 2rem !important; }
 }
+.attendance-table { min-width: 860px; overflow-wrap: normal; }
+.attendance-table th, .attendance-table td { vertical-align: top; }
+.attendance-table .attendance-person, .attendance-table .attendance-site { min-width: 140px; max-width: 240px; white-space: normal; overflow-wrap: break-word; }
+.attendance-table .attendance-time { min-width: 165px; white-space: nowrap; }
+.attendance-table .attendance-duration { min-width: 120px; white-space: nowrap; font-weight: 650; }
+.attendance-locations { min-width: 180px; max-width: 320px; }
+.attendance-locations summary { color: var(--blue); cursor: pointer; white-space: nowrap; }
+.attendance-locations dl { margin: 1rem 0 0; min-width: 260px; line-height: 1.65; }
+.attendance-locations dt { margin-top: .8rem; }
+.attendance-locations dd { margin: .2rem 0 0; }
 @media (min-width: 992px) and (max-width: 1250px) {
   .employee-shortcuts { grid-template-columns: 1fr; gap: .65rem; }
   .dashboard-hero { flex-wrap: wrap; }

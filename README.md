@@ -43,6 +43,8 @@ and unique when supplied; empty IDs are stored as null, so existing employees
 can remain unspecified. This business ID does not replace internal user IDs or
 change login credentials. Personal details remain in admin employee management,
 not shared attendance APIs, employee pages or exports.
+The employee dashboard workspace label and sidebar/mobile-menu account label
+show the designation assigned by the administrator, including during active visits.
 The site catalog is labeled **Site** / **Add Site**; the separate Projects list
 and project-name association remain unchanged.
 
@@ -53,6 +55,39 @@ Confirm the actual birthday before saving, or clear it if unknown. Leave date
 filters initially select today and filter the displayed results accordingly;
 clear both dates and apply filters to view the full history. Month selectors
 continue to default to the current month.
+
+## Admin attendance and activity exports
+
+Admin navigation is hidden behind **Open navigation** on desktop and mobile;
+open the drawer to access all admin pages. Employee desktop navigation is unchanged.
+**Attendance** shows readable employee/site names, check-in/out, and **On-site
+hours** for each visit. GPS coordinates, capture times and distance/source details
+are available under each row's **Location details** disclosure. Visit duration is
+elapsed check-in-to-check-out time, not verified time within the site boundary;
+active durations are calculated at page load. No employee-wide total is added.
+
+Site activity Excel downloads contain one row per IST date for the selected site
+and employee. Multiple activity records for a date appear on separate lines in
+the same Activity detail cell, with at most one billable day per date. Leave
+notes for that date share that cell. Template columns and merged activity cells
+are retained; row heights expand for longer multiline activity text.
+
+## Employee report voice typing
+
+**Start microphone** beside Activity detail adds English speech to the end of
+the report text. Employees can review, edit, clear, or type the text normally;
+voice input never automatically saves or submits a report. English (India) is
+requested. Hindi/Gujarati-to-English translation is not included.
+
+On the website, use an HTTPS browser with Web Speech recognition support
+(for example supported Chrome versions) and allow microphone access. Browser
+support varies; unsupported devices retain normal typing and show an explanation.
+Android uses the phone's speech-input dialog and requires the new 1.4.0 APK
+(versionCode 6), not just an EC2 web update. A speech input provider must be enabled.
+Permission denial, cancellation, no speech and connection errors are shown in
+the form. WorkTrack does not store audio, send it through EC2, or require a paid
+speech API account/key. The browser/phone provider may process audio online
+under its own privacy policy; internet/mobile data charges may apply.
 
 ## Requirements
 
@@ -329,8 +364,9 @@ merged across E-L), and a `REMARKS` label in column A below the activity rows.
 Keep the five remarks rows and totals/customer/sign-off section below that label.
 Unused activity rows remain blank so short reports retain your exact layout.
 If more activities are needed than the template allows, matching rows are added
-before `REMARKS` and the footer and print area move down. Existing activity-row
-heights are not changed; adjust them in Excel for the desired text capacity.
+before `REMARKS` and the footer and print area move down. Activity-row heights
+expand as needed for multiline text, up to Excel's row-height limit; very long
+entries may still need manual adjustment in Excel.
 Only data fields are replaced; edit other labels, formatting and print options
 in the template. Do not put real activity data in its blank activity rows.
 Restarting the app is not required after replacing the file.
@@ -344,9 +380,9 @@ the selector. Each export is scoped to the selected engineer's visits and leave,
 even when several engineers share one site. Unassigned engineers can still
 export their own historical activity but cannot start new visits there.
 
-Each completed visit keeps its own activity row; non-billable visits are 0.
-Only the first billable visit per engineer/site/India-local date counts as 1;
-additional billable visits on that date count as 0. Approved leave
+Each date keeps one activity row; each visit's activity starts on a new line in
+the same merged activity cell. The day counts as 1 if any visit is billable,
+otherwise 0, irrespective of how many visits occurred. Approved leave
 is 0 with the employee's reason (including half-day labels); pending/rejected
 leave is excluded. Leave is employee-wide and appears even if a visit also exists
 that date. Empty dates show 0 and **Sunday** on Sundays or **No activity recorded**

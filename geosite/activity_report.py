@@ -1,5 +1,6 @@
 import io
 import re
+import textwrap
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -32,6 +33,7 @@ def _fill_template(rows, site, employee):
         raise ValueError("Activity template must have activity rows from row 9 followed by REMARKS.")
     extra = max(0, len(rows) - (remarks_row - 9))
     values = {}
+    row_heights = {}
 
     def text(address, value):
         # Use openpyxl's string validation, but never treat user data as formulas.
@@ -64,6 +66,10 @@ def _fill_template(rows, site, employee):
         number(f"C{index}", to_excel(day, workbook.epoch))
         number(f"D{index}", days)
         text(f"E{index}", detail)
+        line_count = sum(max(1, len(textwrap.wrap(line, width=80))) for line in detail.split("\n"))
+        original_height = sheet.row_dimensions[min(index, remarks_row - 1)].height or 15
+        if line_count * 15 + 8 > original_height:
+            row_heights[index] = min(409, line_count * 15 + 8)
     remarks = site.report_remarks.splitlines()
     for offset in range(1, 6):
         text(f"C{remarks_row + extra + offset}", remarks[offset - 1] if offset <= len(remarks) else "")
@@ -127,6 +133,19 @@ def _fill_template(rows, site, employee):
                     xml = xml.replace("</mergeCells>", merges + "</mergeCells>")
                     xml = re.sub(r'(<mergeCells count=")(\d+)', lambda m: m[1] + str(int(m[2]) + extra), xml)
 
+                def resize_row(match):
+                    height = row_heights.get(int(match[1]))
+                    if height is None:
+                        return match[0]
+                    opening, content = match[0].split(">", 1)
+                    opening = re.sub(r'\s+(?:ht|customHeight)="[^"]*"', "", opening)
+                    return f'{opening} ht="{height}" customHeight="1">{content}'
+
+                xml = re.sub(
+                    r'<row\b[^>]*\br="(\d+)"[^>]*>.*?</row>',
+                    resize_row, xml, flags=re.DOTALL,
+                )
+
                 def fill_cell(match):
                     address = match[1]
                     if address not in values:
@@ -165,6 +184,7 @@ def activity_workbook(site, visits, leaves, start, end, employee, automatic_leav
     day = start
     while day <= end:
         billable_day_recorded = False
+        details = []
         for visit in by_date[day]:
             report = visit.report
             detail = report.work_performed
@@ -179,17 +199,18 @@ def activity_workbook(site, visits, leaves, start, end, employee, automatic_leav
                 detail += "\n[Non-billable]"
             billable_day = report.is_billable is True and not billable_day_recorded
             billable_day_recorded = billable_day_recorded or billable_day
-            rows.append((day, int(billable_day), detail))
+            details.append(detail)
         leave_rows = [leave for leave in leaves if leave.start_date <= day <= leave.end_date]
         for leave in leave_rows:
             reason = leave.reason
             if leave.period != "full":
                 reason = f"{leave.period_label}: {reason}"
-            rows.append((day, 0, reason))
+            details.append(reason)
         automatic_rows = [item for item in automatic_leave if item["date"] == day]
         for item in automatic_rows:
-            rows.append((day, 0, f"Automatic leave ({item['days']:g} day): no site visit or approved work confirmation."))
+            details.append(f"Automatic leave ({item['days']:g} day): no site visit or approved work confirmation.")
         if not by_date[day] and not leave_rows and not automatic_rows:
-            rows.append((day, 0, "Sunday" if day.weekday() == 6 else "No activity recorded"))
+            details.append("Sunday" if day.weekday() == 6 else "No activity recorded")
+        rows.append((day, int(billable_day_recorded), "\n".join(details)))
         day += timedelta(days=1)
     return _fill_template(rows, site, employee)

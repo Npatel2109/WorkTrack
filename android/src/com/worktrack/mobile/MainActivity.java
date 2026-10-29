@@ -18,6 +18,7 @@ import android.os.SystemClock;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.speech.RecognizerIntent;
 import android.view.Gravity;
 import android.view.View;
 import android.webkit.CookieManager;
@@ -43,12 +44,15 @@ import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private static final int CAMERA_REQUEST = 10;
     private static final int LOCATION_REQUEST = 11;
     private static final int FILE_REQUEST = 12;
     private static final int MONITOR_PERMISSION_REQUEST = 13;
+    private static final int SPEECH_REQUEST = 14;
+    private int speechNavigation = -1;
     private final String server = AppConfig.SERVER;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable retry = this::retryConnection;
@@ -182,6 +186,19 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
+                if ("worktrack-voice".equals(request.getUrl().getScheme())) {
+                    if (request.isForMainFrame() && request.hasGesture()
+                            && sameOrigin(view.getUrl()) && "worktrack-voice://start".equals(url)) {
+                        startReportSpeech();
+                    } else {
+                        Toast.makeText(MainActivity.this, "Open the report and tap Start microphone to use voice typing.", Toast.LENGTH_LONG).show();
+                        if (sameOrigin(view.getUrl()) && speechNavigation == -1) {
+                            speechNavigation = navigationGeneration;
+                            finishReportSpeech("", "Voice typing was blocked. Tap Start microphone again, or type normally.");
+                        }
+                    }
+                    return true;
+                }
                 if (sameOrigin(url)) return false;
                 openExternal(url);
                 return true;
@@ -192,7 +209,11 @@ public class MainActivity extends Activity {
                 if (pageFailed) showOffline();
                 else showOnline();
                 CookieManager.getInstance().flush();
-                if (sameOrigin(url)) syncVisit();
+                if (sameOrigin(url) && !pageFailed) {
+                    webView.evaluateJavascript(
+                        "window.worktrackNativeSpeech=true;window.dispatchEvent(new Event('worktrack-speech-ready'));", null);
+                    syncVisit();
+                }
             }
 
             @Override
@@ -332,6 +353,29 @@ public class MainActivity extends Activity {
         webView.loadUrl(server + "/login");
     }
 
+    private void startReportSpeech() {
+        if (speechNavigation != -1) return;
+        speechNavigation = navigationGeneration;
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-IN");
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak your activity details in English");
+        try {
+            startActivityForResult(intent, SPEECH_REQUEST);
+        } catch (ActivityNotFoundException | SecurityException error) {
+            finishReportSpeech("", "English voice typing is unavailable. Enable a speech input app on your phone, or type normally.");
+        }
+    }
+
+    private void finishReportSpeech(String text, String error) {
+        int startedOn = speechNavigation;
+        speechNavigation = -1;
+        if (monitorDestroyed || startedOn != navigationGeneration || !sameOrigin(webView.getUrl())) return;
+        webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('worktrack-speech-result',{detail:{text:"
+            + JSONObject.quote(text) + ",error:" + JSONObject.quote(error) + "}}));", null);
+    }
+
     private LinearLayout offlineView() {
         LinearLayout view = new LinearLayout(this);
         view.setOrientation(LinearLayout.VERTICAL);
@@ -459,6 +503,17 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == SPEECH_REQUEST && speechNavigation != -1) {
+            ArrayList<String> results = resultCode == RESULT_OK && data != null
+                ? data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS) : null;
+            if (results != null && !results.isEmpty() && results.get(0) != null && !results.get(0).trim().isEmpty()) {
+                finishReportSpeech(results.get(0), "");
+            } else {
+                finishReportSpeech("", resultCode == RESULT_CANCELED
+                    ? "Voice typing cancelled. You can continue typing normally."
+                    : "No speech received. Try again or type normally.");
+            }
+        }
         if (requestCode == FILE_REQUEST && fileCallback != null) {
             Uri uri = resultCode == RESULT_OK && data != null ? data.getData() : null;
             boolean allowed = uri != null && "content".equals(uri.getScheme())

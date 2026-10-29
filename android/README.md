@@ -29,7 +29,7 @@ To also update the distributable included in this repository:
 ```
 
 This writes `android/downloads/worktrack.apk`, which is downloaded to EC2 by
-`git pull`. The included version 1.3.0 (versionCode 5) is development-signed for
+`git pull`. The included version 1.4.0 (versionCode 6) is development-signed for
 testing, not a production release. Never commit signing keys.
 
 By default this creates a **development-signed APK for testing**, with a local
@@ -82,6 +82,22 @@ supported.
 PDF upload/replacement uses Android's document picker restricted to PDF files.
 Cancelling returns to the form without changing its file. The server validates
 the PDF contents and size. No general device storage permission is requested.
+
+## English report voice typing
+
+The employee Activity detail field has a **Start microphone** button. Install
+version 1.4.0 or later to use the native Android speech-input dialog; a server-only
+update cannot add it to older WebViews. Enable an Android speech-input provider
+that supports English (India). It may require internet access and may process
+audio online. WorkTrack does not record or store audio, request microphone
+permission itself, or require a speech API account/key.
+
+Only a main-frame, user-initiated `worktrack-voice://start` navigation from the
+fixed trusted server can launch speech input. Results return as safely encoded
+text only to the same page/navigation. Cancelling or missing speech services
+shows a message without replacing the employee's text. No JavaScript interface
+is exposed to web frames. New speech is appended; employees can edit it or type
+normally before submitting. Hindi/Gujarati translation is not included.
 
 ## Android active-visit outside-site reminders
 

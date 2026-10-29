@@ -4,7 +4,7 @@
 {% from "_icons.html" import icon %}
 <section class="page-heading dashboard-hero">
   <div class="hero-copy"><p class="eyebrow">{{ icon("spark") }} YOUR DAY, CONNECTED</p><h1>Hello, {{ current_user.name.split(' ')[0] }}<span class="hero-heading-dot">.</span></h1><p>A fresh start. Everything you need for a great workday.</p>
-    <div class="hero-meta"><span>{{ icon("calendar") }} {{ today.strftime("%A, %d %b") }}</span>{% if active_attendance %}<span class="hero-live"><i></i> Onsite now</span>{% else %}<span>Field engineer workspace</span>{% endif %}</div>
+    <div class="hero-meta"><span>{{ icon("calendar") }} {{ today.strftime("%A, %d %b") }}</span><span>{{ current_user.designation }} workspace</span>{% if active_attendance %}<span class="hero-live"><i></i> Onsite now</span>{% endif %}</div>
   </div>
   <a class="btn hero-button" href="#today-work-status">{{ icon("pin") }} {{ "View active visit" if active_attendance else "Update today's status" }} {{ icon("arrow") }}</a>
 </section>

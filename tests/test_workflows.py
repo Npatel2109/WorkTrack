@@ -146,11 +146,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual([sheet.cell(8, c).value for c in range(1, 6)],
                          ["SR NO", "SITE", "DATE", "DAY", "ACTIVITY DETAIL"])
         self.assertEqual([sheet.cell(r, 4).value for r in range(9, 13)], [1, 0, 0, 0])
-        self.assertEqual(sheet["E11"].value, "=literal activity")
-        self.assertEqual(sheet["E11"].data_type, "s")
-        self.assertEqual(sheet["E12"].value, "Sick Leave")
-        self.assertEqual(sheet["E13"].value, "No activity recorded")
-        self.assertEqual(sheet["E17"].value, "Sunday")
+        self.assertEqual(sheet["E9"].value, "Billable work\nNon-billable meeting\n[Non-billable]\n=literal activity")
+        self.assertEqual(sheet["E9"].data_type, "s")
+        self.assertTrue(sheet["E9"].alignment.wrap_text)
+        self.assertGreater(sheet.row_dimensions[9].height, 37.95)
+        self.assertEqual(sheet["E10"].value, "Sick Leave")
+        self.assertEqual(sheet["E11"].value, "No activity recorded")
+        self.assertEqual(sheet["E15"].value, "Sunday")
         self.assertEqual(sheet["K31"].value, 1)
         self.assertEqual(sheet["A25"].value, "REMARKS")
         self.assertEqual([sheet.cell(r, 1).value for r in range(26, 31)], [1, 2, 3, 4, 5])
@@ -271,9 +273,10 @@ class WorkflowTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         sheet = load_workbook(io.BytesIO(response.data)).active
-        self.assertEqual([sheet.cell(row, 3).value.date().isoformat() for row in (9, 10)],
-                         ["2026-10-20", "2026-10-20"])
-        self.assertEqual([sheet.cell(row, 4).value for row in (9, 10)], [1, 0])
+        self.assertEqual(sheet["C9"].value.date().isoformat(), "2026-10-20")
+        self.assertIsNone(sheet["C10"].value)
+        self.assertEqual(sheet["D9"].value, 1)
+        self.assertEqual(sheet["E9"].value.count("\n"), 1)
         total_row = next(row[0].row for row in sheet.iter_rows() if row[0].value == "TOTAL DAYS :")
         self.assertEqual(sheet.cell(total_row, 11).value, 1)
 
@@ -394,6 +397,10 @@ class WorkflowTests(unittest.TestCase):
                      "recommendations", "materials_used", "remarks"):
             payload.pop(name)
         form = self.client.get(f"/visit/{attendance.id}/report")
+        self.assertIn(b'id="report-dictate" type="button"', form.data)
+        self.assertIn(b"English voice typing", form.data)
+        self.assertIn(b"js/report-dictation.js", form.data)
+        self.assertIn(b'id="dictation-status" role="status" aria-live="polite"', form.data)
         self.assertNotIn(b'name="customer_representative_name"', form.data)
         self.assertNotIn(b'class="signature-pad"', form.data)
         self.assertNotIn(b'name="employee_signature"', form.data)
@@ -1559,6 +1566,33 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn(b"Project name", page.data)
         self.assertIn(b'href="/admin/projects"', page.data)
 
+    def test_employee_workspace_uses_admin_assigned_designation(self):
+        self._login_admin()
+        response = self.client.post(f"/admin/employees/{self.employee.id}/edit", data={
+            "name": self.employee.name, "email": self.employee.email,
+            "mobile": self.employee.mobile, "designation": "Senior Engineer & Team Lead",
+        }, follow_redirects=True)
+        self.assertIn(b"Employee details updated.", response.data)
+        self.client.post("/logout")
+        self._login_employee()
+        for path in ("/employee", "/reports", "/employee/leaves"):
+            response = self.client.get(path)
+            self.assertIn(b"<span>Senior Engineer &amp; Team Lead</span>", response.data)
+            self.assertNotIn(b"<span>Field engineer</span>", response.data)
+        response = self.client.get("/employee")
+        self.assertIn(b"Senior Engineer &amp; Team Lead workspace", response.data)
+        self.assertNotIn(b"Field engineer workspace", response.data)
+        visit = Attendance(
+            employee_id=self.employee.id, site_id=self.site.id, status="onsite",
+            checkin_time=datetime.now(timezone.utc), checkin_lat=0, checkin_lon=0,
+            checkin_selfie="test.png",
+        )
+        db.session.add(visit)
+        db.session.commit()
+        response = self.client.get("/employee")
+        self.assertIn(b"Senior Engineer &amp; Team Lead workspace", response.data)
+        self.assertIn(b"Onsite now", response.data)
+
     def test_workspace_navigation_is_role_scoped_and_marks_current_page(self):
         guest = self.client.get("/login")
         self.assertNotIn(b'id="workspaceNav"', guest.data)
@@ -1587,6 +1621,8 @@ class WorkflowTests(unittest.TestCase):
         })
         page = self.client.get("/admin")
         self.assertIn(b'aria-label="Main navigation"', page.data)
+        self.assertIn(b'class="offcanvas offcanvas-start workspace-sidebar"', page.data)
+        self.assertIn(b'class="icon-button" type="button" data-bs-toggle="offcanvas"', page.data)
         self.assertIn(b'href="/admin/employees"', page.data)
         self.assertNotIn(b'aria-label="Quick navigation"', page.data)
         self.assertRegex(
@@ -1595,6 +1631,28 @@ class WorkflowTests(unittest.TestCase):
         )
         live = self.client.get("/api/admin/live-status").get_json()
         self.assertIn("onsite_hours", live["employees"][0])
+
+    def test_attendance_history_shows_each_visit_duration_and_collapsed_locations(self):
+        self._login_admin()
+        start = datetime(2026, 10, 29, 4, tzinfo=timezone.utc)
+        for minutes, status in ((125, "completed"), (66, "report_pending"), (None, "onsite")):
+            db.session.add(Attendance(
+                employee_id=self.employee.id, site_id=self.site.id,
+                checkin_time=start, checkout_time=start + timedelta(minutes=minutes) if minutes else None,
+                status=status, checkin_lat=0, checkin_lon=0, checkin_selfie="test.png",
+                auto_closed=status == "report_pending",
+            ))
+        db.session.commit()
+        with patch("geosite.routes.utcnow", return_value=start + timedelta(hours=3)):
+            page = self.client.get("/admin/attendance")
+        self.assertEqual(page.status_code, 200)
+        for value in (b"On-site hours", b"2h 05m", b"1h 06m", b"3h 00m", b"In progress", b"Auto-stopped"):
+            self.assertIn(value, page.data)
+        self.assertEqual(page.data.count(b'<details class="attendance-locations">'), 3)
+        self.assertNotIn(b'<details class="attendance-locations" open', page.data)
+        self.client.post("/logout")
+        self._login_employee()
+        self.assertEqual(self.client.get("/admin/attendance").status_code, 403)
 
     def test_admin_live_status_and_excel(self):
         self.client.post(

@@ -8,7 +8,15 @@
     <div class="alert alert-info"><strong>Checked in:</strong> {{ attendance.checkin_time|ist }}. Enter the activity and billing details. The administrator can print the report for offline customer name and signatures.</div>
     <form method="post" id="site-report-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="row g-3">
-        <div class="col-12"><label class="form-label" for="activity-detail">Activity detail *</label><textarea class="form-control" id="activity-detail" name="activity_detail" rows="5" required>{{ values.get('activity_detail', '') }}</textarea></div>
+        <div class="col-12">
+          <label class="form-label" for="activity-detail">Activity detail *</label>
+          <textarea class="form-control" id="activity-detail" name="activity_detail" rows="5" aria-describedby="dictation-help dictation-status" required>{{ values.get('activity_detail', '') }}</textarea>
+          <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+            <button class="btn btn-outline-primary" id="report-dictate" type="button" aria-controls="activity-detail" aria-pressed="false" disabled><span aria-hidden="true">&#127908;</span> Start microphone</button>
+            <span class="small text-secondary" id="dictation-status" role="status" aria-live="polite">Checking voice typing support...</span>
+          </div>
+          <p class="form-text mb-0" id="dictation-help">English voice typing. New speech is added at the end; you can edit or type normally before submitting. Hindi/Gujarati translation is not included. Your browser or phone speech provider may process audio online. WorkTrack does not store audio.</p>
+        </div>
         <div class="col-12"><label class="form-label" for="billing">Billing *</label><select class="form-select" id="billing" name="billing" required>
           <option value="">Select billing</option><option value="billable" {% if values.get('billing') == 'billable' %}selected{% endif %}>Billable (1 day)</option><option value="non_billable" {% if values.get('billing') == 'non_billable' %}selected{% endif %}>Non-billable (0 days)</option>
         </select></div>
@@ -19,4 +27,7 @@
     </form>
   </section>
 </div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/report-dictation.js', v='20261029-1') }}"></script>
 {% endblock %}

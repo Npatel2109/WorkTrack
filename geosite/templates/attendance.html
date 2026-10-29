@@ -11,21 +11,25 @@
 <div class="page-heading"><div><p class="eyebrow">AUDIT &amp; ATTENDANCE</p><h1>Attendance history</h1><p class="text-secondary mb-0">Site visit records and account access events.</p></div></div>
 <section class="panel-card mb-4"><div class="section-title"><div><p class="eyebrow">SITE VISITS</p><h2>Attendance records</h2></div></div>
   <p class="small text-secondary">Forgotten visits stop at 23:59 Asia/Kolkata (India). Times below are IST (UTC+05:30); distances are in km. Last-known locations show when they were actually captured, not a fresh GPS fix at stop time. Historical distances not recorded before this update are left blank.</p>
-  <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Employee</th><th>Site</th><th>Assigned location at start</th><th>Check-in (IST)</th><th>Check-out (IST)</th><th>Start location / distance (km)</th><th>Last captured location</th><th>Stop location / distance (km)</th><th>Status</th></tr></thead>
+  <p class="small text-secondary">On-site hours are the elapsed time between check-in and check-out, not verified time inside the site boundary. Active visits show elapsed time as of this page load. Open Location details for GPS coordinates and distances.</p>
+  <div class="table-responsive"><table class="table attendance-table"><thead><tr><th>Employee</th><th>Site</th><th>Check-in (IST)</th><th>Check-out (IST)</th><th>On-site hours</th><th>Status</th><th>Location details</th></tr></thead>
     <tbody>{% for row in attendance %}<tr>
-      <td>{{ row.employee.name }}</td><td>{{ row.site.site_name }}</td>
-      <td>{{ location(row.site_latitude, row.site_longitude) }}</td>
-      <td>{{ row.checkin_time|ist }}</td>
-      <td>{{ row.checkout_time|ist if row.checkout_time else "—" }}{% if row.auto_closed %}<div class="small">Auto-stopped (23:59 India)</div>{% endif %}</td>
-      <td>{{ location(row.checkin_lat, row.checkin_lon, row.checkin_distance_m, row.checkin_location_time) }}</td>
-      <td>{{ location(row.last_location_lat, row.last_location_lon, captured_at=row.last_location_time) }}</td>
-      <td>{% if row.checkout_time %}{{ location(row.checkout_lat, row.checkout_lon, row.checkout_distance_m, row.checkout_location_time) }}
+      <td class="attendance-person">{{ row.employee.name }}</td><td class="attendance-site">{{ row.site.site_name }}</td>
+      <td class="attendance-time">{{ row.checkin_time|ist }}</td>
+      <td class="attendance-time">{{ row.checkout_time|ist if row.checkout_time else "—" }}{% if row.auto_closed %}<div class="small">Auto-stopped (23:59 India)</div>{% endif %}</td>
+      <td class="attendance-duration">{{ visit_durations[row.id] }}{% if not row.checkout_time %}<div class="small text-secondary">In progress</div>{% endif %}</td>
+      <td><span class="status-pill {{ row.status }}">{{ row.status|replace("_", " ")|title }}</span></td>
+      <td><details class="attendance-locations"><summary>Location details</summary><dl>
+        <dt>Assigned location at start</dt><dd>{{ location(row.site_latitude, row.site_longitude) }}</dd>
+        <dt>Start location / distance (km)</dt><dd>{{ location(row.checkin_lat, row.checkin_lon, row.checkin_distance_m, row.checkin_location_time) }}</dd>
+        <dt>Last captured location</dt><dd>{{ location(row.last_location_lat, row.last_location_lon, captured_at=row.last_location_time) }}</dd>
+        <dt>Stop location / distance (km)</dt><dd>{% if row.checkout_time %}{{ location(row.checkout_lat, row.checkout_lon, row.checkout_distance_m, row.checkout_location_time) }}
         <div class="small fw-semibold">{{ {"current": "Current GPS", "last_known": "Last captured location", "unavailable": "Location unavailable", "legacy": "Historical capture (source not recorded)"}.get(row.checkout_location_source, "Source not recorded") }}</div>
         {% if row.checkout_location_reason %}<div class="small text-secondary">{{ row.checkout_location_reason|replace("_", " ")|title }}</div>{% endif %}
-        {% else %}Not stopped{% endif %}</td>
-      <td><span class="status-pill {{ row.status }}">{{ row.status|replace("_", " ")|title }}</span></td>
+        {% else %}Not stopped{% endif %}</dd>
+      </dl></details></td>
     </tr>
-    {% else %}<tr><td colspan="9" class="empty-state">No attendance records.</td></tr>{% endfor %}</tbody>
+    {% else %}<tr><td colspan="7" class="empty-state">No attendance records.</td></tr>{% endfor %}</tbody>
   </table></div>
 </section>
 <section class="panel-card"><div class="section-title"><div><p class="eyebrow">ACCESS LOG</p><h2>Login / logout events</h2></div></div>

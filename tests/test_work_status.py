@@ -303,9 +303,9 @@ class WorkStatusTests(unittest.TestCase):
         params = {"site_id": self.site.id, "start_date": "2026-10-26", "end_date": "2026-10-27"}
         response = self.client.get("/reports/activity.xlsx", query_string=params)
         sheet = load_workbook(io.BytesIO(response.data)).active
-        details = [row[4].value for row in sheet.iter_rows(min_row=9)]
-        self.assertIn("Automatic leave (0.5 day): no site visit or approved work confirmation.", details)
-        self.assertIn("Automatic leave (1 day): no site visit or approved work confirmation.", details)
+        self.assertEqual(sheet["E9"].value, "Half day - morning: Leave reason\nAutomatic leave (0.5 day): no site visit or approved work confirmation.")
+        self.assertEqual(sheet["E10"].value, "Automatic leave (1 day): no site visit or approved work confirmation.")
+        self.assertIsNone(sheet["C11"].value)
         self.login(self.admin)
         page = self.client.get(f"/admin/leaves?employee_id={self.employee.id}&from_date=2026-10-26&to_date=2026-10-27")
         self.assertIn(b'id="leave-total">2', page.data)

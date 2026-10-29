@@ -2521,7 +2521,11 @@ def export_excel():
 def attendance_history():
     visits = Attendance.query.order_by(Attendance.checkin_time.desc()).limit(500).all()
     logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(500).all()
-    return render_template("attendance.html", attendance=visits, audit_logs=logs)
+    now = utcnow()
+    return render_template(
+        "attendance.html", attendance=visits, audit_logs=logs,
+        visit_durations={visit.id: _format_hours(_attendance_hours(visit, now)) for visit in visits},
+    )
 
 
 @bp.route("/media/<path:filename>")
