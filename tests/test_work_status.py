@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from flask_migrate import downgrade, upgrade
 from openpyxl import load_workbook
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
 from geosite import create_app
 from geosite.attendance import daily_cutoff
@@ -637,8 +637,12 @@ class WorkStatusMigrationTests(unittest.TestCase):
             with app.app_context():
                 try:
                     upgrade(directory=migrations, revision="e48f9a0b1c27")
-                    user = User(name="Old", email="old@example.com", mobile="1", password_hash="test")
-                    db.session.add(user)
+                    db.session.execute(text("""
+                        INSERT INTO "user"
+                        (id, name, email, mobile, designation, password_hash, role, created_date, is_active)
+                        VALUES (1, 'Old', 'old@example.com', '1',
+                                'Engineer', 'test', 'employee', '2026-10-01', 1)
+                    """))
                     db.session.commit()
                     upgrade(directory=migrations)
                     self.assertEqual(db.session.get(AttendancePolicy, 1).effective_from,
@@ -674,7 +678,10 @@ class WorkStatusMigrationTests(unittest.TestCase):
                     self.assertNotIn("daily_work_status", inspect(db.engine).get_table_names())
                     self.assertNotIn("monthly_leave_entitlement", inspect(db.engine).get_table_names())
                     self.assertNotIn("leave_allowance_account", inspect(db.engine).get_table_names())
-                    self.assertEqual(User.query.one().name, "Old")
+                    self.assertEqual(db.session.execute(text(
+                        'SELECT name FROM "user" WHERE id = 1'
+                    )).scalar_one(), "Old")
+                    db.session.commit()
                     upgrade(directory=migrations)
                     self.assertEqual(DailyWorkStatus.query.count(), 0)
                 finally:

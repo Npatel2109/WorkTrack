@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from flask_migrate import downgrade, upgrade
 from pypdf import PdfWriter
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
@@ -487,10 +487,14 @@ class SubmittedReportMigrationTests(unittest.TestCase):
             with app.app_context():
                 try:
                     upgrade(directory=migrations, revision="d37e8f9a0b16")
-                    user = User(name="Existing", email="existing@example.com", mobile="1", password_hash="test")
-                    db.session.add(user)
+                    db.session.execute(text("""
+                        INSERT INTO "user"
+                        (id, name, email, mobile, designation, password_hash, role, created_date, is_active)
+                        VALUES (1, 'Existing', 'existing@example.com', '1',
+                                'Engineer', 'test', 'employee', '2026-10-01', 1)
+                    """))
                     db.session.commit()
-                    user_id = user.id
+                    user_id = 1
                     upgrade(directory=migrations)
                     report = SubmittedReport(employee_id=user_id, revision_number=1)
                     db.session.add(SubmittedReportVersion(
@@ -504,7 +508,10 @@ class SubmittedReportMigrationTests(unittest.TestCase):
                     downgrade(directory=migrations, revision="d37e8f9a0b16")
                     self.assertNotIn("submitted_report", inspect(db.engine).get_table_names())
                     self.assertNotIn("submitted_report_version", inspect(db.engine).get_table_names())
-                    self.assertEqual(db.session.get(User, user_id).name, "Existing")
+                    self.assertEqual(db.session.execute(text(
+                        'SELECT name FROM "user" WHERE id = 1'
+                    )).scalar_one(), "Existing")
+                    db.session.commit()
                     upgrade(directory=migrations)
                     self.assertEqual(SubmittedReport.query.count(), 0)
                     self.assertEqual(db.session.get(User, user_id).name, "Existing")

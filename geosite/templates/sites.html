@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Projects and sites{% endblock %}
+{% block title %}Sites{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">FIELD OPERATIONS</p><h1>Project</h1><p class="text-secondary mb-0">Add each project site once. Assign it to any number of engineers in Assign sites.</p></div><div class="d-flex gap-2"><a class="btn btn-outline-primary" href="{{ url_for('main.projects') }}">Project list</a><a class="btn btn-outline-primary" href="{{ url_for('main.site_assignments') }}">Assign sites</a></div></div>
+<div class="page-heading"><div><p class="eyebrow">FIELD OPERATIONS</p><h1>Site</h1><p class="text-secondary mb-0">Add each site once. Assign it to any number of engineers in Assign sites.</p></div><div class="d-flex gap-2"><a class="btn btn-outline-primary" href="{{ url_for('main.projects') }}">Project list</a><a class="btn btn-outline-primary" href="{{ url_for('main.site_assignments') }}">Assign sites</a></div></div>
 <div class="row g-4">
-  <div class="col-xl-4"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">SITE DETAILS</p><h2>{{ "Edit site" if editing_site else "Add Project" }}</h2></div></div>
+  <div class="col-xl-4"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">SITE DETAILS</p><h2>{{ "Edit site" if editing_site else "Add Site" }}</h2></div></div>
     <form method="post" action="{{ url_for('main.sites', site_id=editing_site.id) if editing_site else url_for('main.sites') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label class="form-label">Site name</label><input class="form-control mb-3" name="site_name" maxlength="160" value="{{ values.site_name if values else '' }}" required>
       <label class="form-label">Customer name</label><input class="form-control mb-3" name="customer_name" maxlength="160" value="{{ values.customer_name if values else '' }}" required>
@@ -23,7 +23,7 @@
       </div>
       <label class="form-label">Reference radius (meters; does not block visits)</label><input class="form-control mb-3" name="allowed_radius" type="number" min="10" max="5000" value="{{ values.allowed_radius if values else 100 }}" required>
       <p class="form-text">Site details are shared by all assigned engineers. Saved attendance coordinates and distances remain unchanged. Use Assign sites to change engineer access.</p>
-      <button class="btn btn-primary w-100">{{ "Save changes" if editing_site else "Add Project" }}</button>
+      <button class="btn btn-primary w-100">{{ "Save changes" if editing_site else "Add Site" }}</button>
       {% if editing_site %}<a class="btn btn-outline-secondary w-100 mt-2" href="{{ url_for('main.sites') }}">Cancel editing</a>{% endif %}
     </form>
   </section></div>

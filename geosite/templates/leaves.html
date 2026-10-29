@@ -44,8 +44,8 @@
   <form method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="row g-3">
-      <div class="col-md-4"><label class="form-label" for="leave-start">Start date</label><input class="form-control" id="leave-start" name="start_date" type="date" min="{{ today }}" value="{{ request.form.get('start_date', '') }}" required></div>
-      <div class="col-md-4"><label class="form-label" for="leave-end">End date</label><input class="form-control" id="leave-end" name="end_date" type="date" min="{{ today }}" value="{{ request.form.get('end_date', '') }}" required></div>
+      <div class="col-md-4"><label class="form-label" for="leave-start">Start date</label><input class="form-control" id="leave-start" name="start_date" type="date" min="{{ today }}" value="{{ request.form.get('start_date', current_date) }}" required></div>
+      <div class="col-md-4"><label class="form-label" for="leave-end">End date</label><input class="form-control" id="leave-end" name="end_date" type="date" min="{{ today }}" value="{{ request.form.get('end_date', current_date) }}" required></div>
       <div class="col-md-4"><label class="form-label" for="leave-period">Duration</label><select class="form-select" id="leave-period" name="period" required>
         {% for value, label in [('full', 'Full day(s)'), ('morning', 'Half day - morning'), ('afternoon', 'Half day - afternoon')] %}<option value="{{ value }}" {% if request.form.get('period', 'full') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select></div>

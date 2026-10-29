@@ -7,11 +7,13 @@ from zipfile import ZipFile
 from unittest.mock import patch
 from urllib.parse import urlparse
 from datetime import date, datetime, timedelta, timezone
+from html.parser import HTMLParser
 
 from PIL import Image
 from pypdf import PdfReader
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
+from sqlalchemy.exc import IntegrityError
 
 from geosite import create_app
 from geosite.attendance import as_utc, close_overdue_visits, daily_cutoff
@@ -1335,6 +1337,227 @@ class WorkflowTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
+
+    def test_admin_creates_and_edits_optional_employee_details(self):
+        self._login_admin()
+        payload = {
+            "name": "New Engineer", "email": "new@example.com",
+            "mobile": "1234567890", "designation": "Engineer",
+            "password": "new-password-123",
+            "address": "  15 Field Road\nMumbai  ",
+            "emergency_contact_no": "+91 9876543210",
+            "blood_group": "o+", "laptop_serial_no": "LAP-100",
+            "employee_code": " eng-101 ",
+            "birthday": "1996-02-29",
+        }
+        response = self.client.post("/admin/employees", data=payload, follow_redirects=True)
+        self.assertIn(b"Employee created.", response.data)
+        employee = User.query.filter_by(email=payload["email"]).one()
+        self.assertEqual(employee.address, "15 Field Road\nMumbai")
+        self.assertEqual(employee.blood_group, "O+")
+        self.assertEqual(employee.employee_code, "ENG-101")
+        self.assertEqual(employee.emergency_contact_no, payload["emergency_contact_no"])
+        self.assertEqual(employee.laptop_serial_no, "LAP-100")
+        self.assertEqual(employee.birthday.isoformat(), "1996-02-29")
+        self.assertTrue(employee.check_password(payload["password"]))
+        for label in (b"Address", b"Emergency Contact No", b"Blood Group", b"Laptop serial no", b"Employee ID", b"Birthday"):
+            self.assertIn(label, response.data)
+        class DetailParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.fields = []
+
+            def handle_starttag(self, tag, attrs):
+                attributes = dict(attrs)
+                if tag in ("input", "select", "textarea") and attributes.get("name") in (
+                    "address", "emergency_contact_no", "blood_group",
+                    "laptop_serial_no", "employee_code", "birthday",
+                ):
+                    self.fields.append(attributes)
+
+        parser = DetailParser()
+        parser.feed(response.data.decode())
+        self.assertGreaterEqual(len(parser.fields), 12)
+        self.assertTrue(all("required" not in field for field in parser.fields))
+        self.assertIn(b'value="1996-02-29"', response.data)
+
+        updated = {**payload, "address": "Updated address", "blood_group": "AB-", "employee_code": "ENG-102", "birthday": "1995-03-15"}
+        response = self.client.post(f"/admin/employees/{employee.id}/edit", data=updated, follow_redirects=True)
+        self.assertIn(b"Employee details updated.", response.data)
+        db.session.refresh(employee)
+        self.assertEqual(employee.address, "Updated address")
+        self.assertEqual(employee.blood_group, "AB-")
+        self.assertEqual(employee.employee_code, "ENG-102")
+        self.assertEqual(employee.birthday.isoformat(), "1995-03-15")
+        legacy_payload = {key: payload[key] for key in ("name", "email", "mobile", "designation")}
+        self.client.post(f"/admin/employees/{employee.id}/edit", data=legacy_payload)
+        db.session.refresh(employee)
+        self.assertEqual(employee.address, "Updated address")
+        self.assertEqual(employee.employee_code, "ENG-102")
+        self.assertEqual(employee.birthday.isoformat(), "1995-03-15")
+        cleared = {**legacy_payload, **{key: "" for key in (
+            "address", "emergency_contact_no", "blood_group", "laptop_serial_no", "employee_code", "birthday"
+        )}}
+        self.client.post(f"/admin/employees/{employee.id}/edit", data=cleared)
+        db.session.refresh(employee)
+        self.assertIsNone(employee.employee_code)
+        self.assertEqual(employee.address, "")
+        self.assertEqual(employee.blood_group, "")
+        self.assertIsNone(employee.birthday)
+
+    def test_employee_details_validation_uniqueness_and_privacy(self):
+        self._login_admin()
+        self.employee.employee_code = "ENG-001"
+        self.employee.address = "Private employee address"
+        self.employee.emergency_contact_no = "Private emergency number"
+        self.employee.blood_group = "AB-"
+        self.employee.laptop_serial_no = "PRIVATE-LAPTOP"
+        db.session.commit()
+        payload = {
+            "name": "New Engineer", "email": "new@example.com",
+            "mobile": "123", "designation": "Engineer", "password": "password-12345",
+        }
+        for updates, message in (
+            ({"employee_code": " eng-001 "}, b"already uses that Employee ID"),
+            ({"blood_group": "X+"}, b"valid blood group"),
+            ({"address": "a" * 1001}, b"Address must be at most"),
+            ({"emergency_contact_no": "1" * 41}, b"Emergency contact number must be at most"),
+            ({"employee_code": "e" * 81}, b"Employee ID must be at most"),
+            ({"laptop_serial_no": "s" * 121}, b"Laptop serial number must be at most"),
+            ({"birthday": "1995-02-29"}, b"Enter a valid birthday"),
+            ({"birthday": "not-a-date"}, b"Enter a valid birthday"),
+            ({"birthday": "19960229"}, b"Enter a valid birthday"),
+            ({"birthday": "9999-12-31"}, b"Birthday cannot be in the future"),
+        ):
+            with self.subTest(updates=updates):
+                response = self.client.post("/admin/employees", data={**payload, **updates})
+                self.assertIn(message, response.data)
+                self.assertIsNone(User.query.filter_by(email=payload["email"]).first())
+        self.client.post("/admin/employees", data=payload)
+        new_employee = User.query.filter_by(email=payload["email"]).one()
+        self.assertIsNone(new_employee.birthday)
+        response = self.client.post(
+            f"/admin/employees/{new_employee.id}/edit",
+            data={**payload, "birthday": "invalid", "address": "Should not save"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"Enter a valid birthday", response.data)
+        db.session.refresh(new_employee)
+        self.assertIsNone(new_employee.birthday)
+        self.assertEqual(new_employee.address, "")
+        response = self.client.post(
+            f"/admin/employees/{new_employee.id}/edit",
+            data={**payload, "employee_code": "eng-001", "address": "Should not save"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"already uses that Employee ID", response.data)
+        db.session.refresh(new_employee)
+        self.assertIsNone(new_employee.employee_code)
+        self.assertEqual(new_employee.address, "")
+        self.assertIsNone(self.admin.employee_code)
+        with self.assertRaises(IntegrityError):
+            with db.session.begin_nested():
+                new_employee.employee_code = "ENG-001"
+                db.session.flush()
+        self.client.post("/logout")
+        self._login_employee()
+        self.assertEqual(self.client.get("/admin/employees").status_code, 403)
+        self.assertEqual(self.client.post(
+            f"/admin/employees/{new_employee.id}/edit", data=payload
+        ).status_code, 403)
+        for path in ("/employee", "/api/admin/live-status", "/reports"):
+            response = self.client.get(path)
+            for private in (b"Private employee address", b"Private emergency number", b"PRIVATE-LAPTOP"):
+                self.assertNotIn(private, response.data)
+
+    def test_date_selectors_default_to_current_ist_day_for_both_roles(self):
+        self.app.config["SESSION_TIMEOUT_MINUTES"] = 100000
+        class DateParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.fields = {}
+
+            def handle_starttag(self, tag, attrs):
+                attributes = dict(attrs)
+                if tag == "input" and attributes.get("type") == "date":
+                    self.fields[attributes["id"]] = attributes.get("value", "")
+
+        pages = (
+            (self._login_admin, {
+                "/admin/employees": ["new-birthday", f"edit-{self.employee.id}-birthday"],
+                "/admin/leaves/new": ["admin-leave-start", "admin-leave-end"],
+                "/admin/leaves": ["filter-from", "filter-to"],
+                "/admin/invoices": ["po-start", "po-end", "invoice-po-date", "invoice-start", "invoice-end"],
+                "/reports": ["activity-start", "activity-end", "start-date", "end-date"],
+            }),
+            (self._login_employee, {
+                "/employee/leaves": ["leave-start", "leave-end", "filter-from", "filter-to"],
+                "/employee/submitted-reports/new": ["report-start", "report-end"],
+                "/reports": ["activity-start", "activity-end"],
+            }),
+        )
+        for login, paths in pages:
+            self.client.post("/logout")
+            login()
+            for hour, expected in ((18, "2026-10-29"), (20, "2026-10-30")):
+                now = datetime(2026, 10, 29, hour, tzinfo=timezone.utc)
+                with patch("geosite.datetime", wraps=datetime) as clock, patch(
+                    "geosite.routes.utcnow", return_value=now
+                ):
+                    clock.now.return_value = now
+                    for path, identifiers in paths.items():
+                        with self.subTest(path=path, expected=expected):
+                            response = self.client.get(path)
+                            self.assertEqual(response.status_code, 200)
+                            parser = DateParser()
+                            parser.feed(response.data.decode())
+                            for identifier in identifiers:
+                                self.assertEqual(parser.fields[identifier], expected)
+
+    def test_date_defaults_preserve_saved_entered_and_cleared_dates(self):
+        self._login_admin()
+        self.employee.birthday = date(1996, 2, 29)
+        leave = LeaveRequest(
+            employee_id=self.employee.id, start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 2), period="full", reason="Historical leave",
+        )
+        db.session.add(leave)
+        db.session.commit()
+        response = self.client.get("/admin/employees")
+        self.assertIn(b'value="1996-02-29"', response.data)
+        response = self.client.get(f"/admin/leaves/{leave.id}/edit")
+        self.assertIn(b'value="2026-09-01"', response.data)
+        self.assertIn(b'value="2026-09-02"', response.data)
+        response = self.client.get("/admin/leaves")
+        self.assertNotIn(b"Historical leave", response.data)
+        response = self.client.get("/admin/leaves?from_date=2026-09-01&to_date=2026-09-02")
+        self.assertIn(b'value="2026-09-01"', response.data)
+        self.assertIn(b"Historical leave", response.data)
+        response = self.client.get("/admin/leaves?from_date=&to_date=")
+        self.assertIn(b'name="from_date" type="date" value=""', response.data)
+        self.assertIn(b"Historical leave", response.data)
+        response = self.client.post("/admin/leaves/new", data={
+            "employee_id": str(self.employee.id), "start_date": "2026-09-03",
+            "end_date": "", "period": "full", "reason": "Incomplete dates",
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b'value="2026-09-03"', response.data)
+        self.assertIn(b'name="end_date" value=""', response.data)
+        response = self.client.post("/admin/employees", data={
+            "name": "", "birthday": "",
+        })
+        self.assertIn(b'max="' + india_date(datetime.now(timezone.utc)).isoformat().encode() + b'" value=""', response.data)
+
+    def test_site_navigation_and_add_form_use_site_label(self):
+        self._login_admin()
+        page = self.client.get("/admin/sites")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"<h1>Site</h1>", page.data)
+        self.assertIn(b"Add Site", page.data)
+        self.assertNotIn(b"Add Project", page.data)
+        self.assertRegex(page.data.decode(), r'(?s)href="/admin/sites"[^>]*>.*?<span>Site</span>')
+        self.assertIn(b"Project name", page.data)
+        self.assertIn(b'href="/admin/projects"', page.data)
 
     def test_workspace_navigation_is_role_scoped_and_marks_current_page(self):
         guest = self.client.get("/login")

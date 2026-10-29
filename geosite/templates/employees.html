@@ -1,14 +1,29 @@
 {% extends "base.html" %}
 {% block title %}Employee management{% endblock %}
+{% macro detail_fields(employee=none, prefix="new") %}
+{% set posted = request.form if not employee and request.method == "POST" else {} %}
+<div class="col-12"><p class="form-text mb-0">All additional employee details below are optional.</p></div>
+<div class="col-12"><label class="form-label" for="{{ prefix }}-address">Address</label><textarea class="form-control" id="{{ prefix }}-address" name="address" maxlength="1000" rows="2">{{ posted.get("address", employee.address if employee else "") }}</textarea></div>
+{% for field, label, maximum in [
+  ("employee_code", "Employee ID", 80),
+  ("emergency_contact_no", "Emergency Contact No", 40),
+  ("laptop_serial_no", "Laptop serial no", 120)
+] %}
+<div class="col-md-6"><label class="form-label" for="{{ prefix }}-{{ field }}">{{ label }}</label><input class="form-control" id="{{ prefix }}-{{ field }}" name="{{ field }}" type="{{ 'tel' if field == 'emergency_contact_no' else 'text' }}" maxlength="{{ maximum }}" value="{{ posted.get(field, employee|attr(field) if employee else '') or '' }}">{% if field == "employee_code" %}<div class="form-text">Optional. Unique across accounts; saved in uppercase.</div>{% endif %}</div>
+{% endfor %}
+<div class="col-md-6"><label class="form-label" for="{{ prefix }}-blood-group">Blood Group</label><select class="form-select" id="{{ prefix }}-blood-group" name="blood_group"><option value="">Not specified</option>{% for group in blood_groups %}<option value="{{ group }}"{% if posted.get("blood_group", employee.blood_group if employee else "")|upper == group %} selected{% endif %}>{{ group }}</option>{% endfor %}</select></div>
+<div class="col-md-6"><label class="form-label" for="{{ prefix }}-birthday">Birthday</label><input class="form-control" id="{{ prefix }}-birthday" name="birthday" type="date" max="{{ birthday_max }}" value="{{ posted.get('birthday', employee.birthday.isoformat() if employee and employee.birthday else current_date) }}"><div class="form-text">Defaults to today. Choose the actual birthday or clear it if unknown.</div></div>
+{% endmacro %}
 {% block content %}
 <div class="page-heading"><div><p class="eyebrow">PEOPLE</p><h1>Employee management</h1><p class="text-secondary mb-0">Create accounts and manage field engineer access.</p></div></div>
 <div class="row g-4">
   <div class="col-xl-4"><section class="panel-card"><div class="section-title"><div><p class="eyebrow">NEW ACCOUNT</p><h2>Add employee</h2></div></div>
     <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label class="form-label">Full name</label><input class="form-control mb-3" name="name" maxlength="120" required>
-      <label class="form-label">Email</label><input class="form-control mb-3" name="email" type="email" maxlength="255" required>
-      <label class="form-label">Mobile</label><input class="form-control mb-3" name="mobile" maxlength="40" required>
-      <label class="form-label">Designation</label><input class="form-control mb-3" name="designation" maxlength="120" required>
+      <label class="form-label" for="new-name">Full name</label><input class="form-control mb-3" id="new-name" name="name" maxlength="120" value="{{ request.form.get('name', '') }}" required>
+      <label class="form-label" for="new-email">Email</label><input class="form-control mb-3" id="new-email" name="email" type="email" maxlength="255" value="{{ request.form.get('email', '') }}" required>
+      <label class="form-label" for="new-mobile">Mobile</label><input class="form-control mb-3" id="new-mobile" name="mobile" maxlength="40" value="{{ request.form.get('mobile', '') }}" required>
+      <label class="form-label" for="new-designation">Designation</label><input class="form-control mb-3" id="new-designation" name="designation" maxlength="120" value="{{ request.form.get('designation', '') }}" required>
+      <div class="row g-3 mb-3">{{ detail_fields() }}</div>
       <label class="form-label">Initial password</label><input class="form-control mb-2" name="password" type="password" minlength="12" autocomplete="new-password" required>
       <div class="form-text mb-3">Use at least 12 characters.</div><button class="btn btn-primary w-100">Create employee</button>
     </form>
@@ -17,18 +32,19 @@
     <div class="table-responsive"><table class="table align-middle">
       <thead><tr><th>Employee</th><th>Mobile</th><th>Designation</th><th>Access</th><th>Actions</th></tr></thead>
       <tbody>{% for employee in employees %}
-        <tr><td><div class="fw-semibold">{{ employee.name }}</div><div class="small text-secondary">{{ employee.email }}</div></td><td>{{ employee.mobile }}</td><td>{{ employee.designation }}</td>
+        <tr><td><div class="fw-semibold">{{ employee.name }}</div><div class="small text-secondary">{{ employee.email }}</div>{% if employee.employee_code %}<div class="small">Employee ID: {{ employee.employee_code }}</div>{% endif %}</td><td>{{ employee.mobile }}</td><td>{{ employee.designation }}</td>
           <td><span class="status-pill {{ 'assigned' if employee.is_active else 'offline' }}">{{ 'Active' if employee.is_active else 'Disabled' }}</span></td>
           <td><button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#edit-{{ employee.id }}">Edit</button>
             <form class="d-inline" method="post" action="{{ url_for('main.delete_employee', user_id=employee.id) }}" onsubmit="return confirm('Delete or deactivate this employee?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-sm btn-outline-danger">Remove</button></form>
           </td></tr>
         <tr><td colspan="5" class="p-0"><div class="collapse p-3 bg-body-tertiary" id="edit-{{ employee.id }}">
           <form class="row g-2" method="post" action="{{ url_for('main.edit_employee', user_id=employee.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="col-md-3"><input class="form-control form-control-sm" name="name" value="{{ employee.name }}" required></div>
-            <div class="col-md-3"><input class="form-control form-control-sm" name="email" type="email" value="{{ employee.email }}" required></div>
-            <div class="col-md-2"><input class="form-control form-control-sm" name="mobile" value="{{ employee.mobile }}" required></div>
-            <div class="col-md-2"><input class="form-control form-control-sm" name="designation" value="{{ employee.designation }}" required></div>
-            <div class="col-md-2"><button class="btn btn-sm btn-primary w-100">Save</button></div>
+            <div class="col-md-6"><label class="form-label" for="edit-{{ employee.id }}-name">Full name</label><input class="form-control" id="edit-{{ employee.id }}-name" name="name" maxlength="120" value="{{ employee.name }}" required></div>
+            <div class="col-md-6"><label class="form-label" for="edit-{{ employee.id }}-email">Email</label><input class="form-control" id="edit-{{ employee.id }}-email" name="email" type="email" maxlength="255" value="{{ employee.email }}" required></div>
+            <div class="col-md-6"><label class="form-label" for="edit-{{ employee.id }}-mobile">Mobile</label><input class="form-control" id="edit-{{ employee.id }}-mobile" name="mobile" maxlength="40" value="{{ employee.mobile }}" required></div>
+            <div class="col-md-6"><label class="form-label" for="edit-{{ employee.id }}-designation">Designation</label><input class="form-control" id="edit-{{ employee.id }}-designation" name="designation" maxlength="120" value="{{ employee.designation }}" required></div>
+            {{ detail_fields(employee, "edit-" ~ employee.id) }}
+            <div class="col-12"><button class="btn btn-sm btn-primary">Save</button></div>
           </form>
           <form class="row g-2 mt-1" method="post" action="{{ url_for('main.reset_employee_password', user_id=employee.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="col-md-9"><input class="form-control form-control-sm" name="password" type="password" minlength="12" placeholder="New password (at least 12 characters)" required></div>

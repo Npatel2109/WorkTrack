@@ -9,8 +9,8 @@
     <div class="col-md-4"><label class="form-label" for="po-assignment">Employee / site *</label><select class="form-select" id="po-assignment" name="po_assignment" required><option value="">Select employee / site</option>{% for assignment in assignments %}<option value="{{ assignment.employee_id }}:{{ assignment.site_id }}">{{ assignment.employee.name }} · {{ assignment.site.site_name }}</option>{% endfor %}</select></div>
     <input type="hidden" id="po-employee-id" name="po_employee_id"><input type="hidden" id="po-site-id" name="po_site_id">
     <div class="col-md-2"><label class="form-label" for="po-mandays">Total man-days {% set info_text = "Enter the PO man-day limit. Zero means no limit is configured." %}{% include "_info.html" %}</label><input class="form-control" id="po-mandays" name="total_mandays" type="number" min="0" step="1" value="0"></div>
-    <div class="col-md-3"><label class="form-label" for="po-start">Start date *</label><input class="form-control" id="po-start" name="po_start_date" type="date" required></div>
-    <div class="col-md-3"><label class="form-label" for="po-end">End date *</label><input class="form-control" id="po-end" name="po_end_date" type="date" required></div>
+    <div class="col-md-3"><label class="form-label" for="po-start">Start date *</label><input class="form-control" id="po-start" name="po_start_date" type="date" value="{{ request.form.get('po_start_date', current_date) }}" required></div>
+    <div class="col-md-3"><label class="form-label" for="po-end">End date *</label><input class="form-control" id="po-end" name="po_end_date" type="date" value="{{ request.form.get('po_end_date', current_date) }}" required></div>
     <div class="col-md-3 align-self-end"><button class="btn btn-primary">Save PO</button></div>
   </form>
 </section>
@@ -30,12 +30,12 @@
       <select class="form-select mb-3" id="invoice-site" name="site_id" required><option value="">Select employee / site</option>{% for assignment in assignments %}<option value="{{ assignment.site_id }}" data-employee-id="{{ assignment.employee_id }}" data-customer="{{ assignment.site.customer_name }}">{{ assignment.employee.name }} · {{ assignment.site.site_name }} ({{ assignment.site.customer_name }})</option>{% endfor %}</select>
       <input type="hidden" id="invoice-employee" name="employee_id">
       <label class="form-label" for="invoice-po-number">PO number</label><input class="form-control mb-3" id="invoice-po-number" name="po_number" maxlength="120">
-      <label class="form-label" for="invoice-po-date">PO date</label><input class="form-control mb-3" id="invoice-po-date" name="po_date" type="date">
+      <label class="form-label" for="invoice-po-date">PO date</label><input class="form-control mb-3" id="invoice-po-date" name="po_date" type="date" value="{{ request.form.get('po_date', current_date) }}">
       <label class="form-label" for="invoice-customer">Customer name *</label><input class="form-control mb-3" id="invoice-customer" name="customer_name" maxlength="160" required>
       <label class="form-label" for="invoice-description">Invoice description *</label><textarea class="form-control mb-3" id="invoice-description" name="description" rows="3" required></textarea>
       <div class="row g-3">
-        <div class="col-6"><label class="form-label" for="invoice-start">Start date *</label><input class="form-control" id="invoice-start" name="start_date" type="date" required></div>
-        <div class="col-6"><label class="form-label" for="invoice-end">End date *</label><input class="form-control" id="invoice-end" name="end_date" type="date" required></div>
+        <div class="col-6"><label class="form-label" for="invoice-start">Start date *</label><input class="form-control" id="invoice-start" name="start_date" type="date" value="{{ request.form.get('start_date', current_date) }}" required></div>
+        <div class="col-6"><label class="form-label" for="invoice-end">End date *</label><input class="form-control" id="invoice-end" name="end_date" type="date" value="{{ request.form.get('end_date', current_date) }}" required></div>
         <div class="col-6"><label class="form-label" for="billable-days">Billable days *</label><input class="form-control" id="billable-days" name="billable_days" type="number" min="1" step="1" required></div>
         <div class="col-6"><label class="form-label" for="daily-rate">Rate per day *</label><input class="form-control" id="daily-rate" name="daily_rate" type="number" min="0.01" step="0.01" required></div>
         <div class="col-6"><label class="form-label" for="currency">Currency *</label><select class="form-select" id="currency" name="currency" required>{% for code in ["INR","USD","EUR","GBP","AED"] %}<option value="{{ code }}" {% if code == "INR" %}selected{% endif %}>{{ code }}</option>{% endfor %}</select></div>
@@ -86,6 +86,7 @@
   };
   start.addEventListener("change", calculateDays); end.addEventListener("change", calculateDays);
   days.addEventListener("input", updateTotal); rate.addEventListener("input", updateTotal); currency.addEventListener("change", updateTotal);
+  calculateDays();
 })();
 </script>
 {% endblock %}

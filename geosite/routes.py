@@ -35,7 +35,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from .extensions import db
 from .attendance import daily_cutoff, stop_attendance
 from .timeutils import INDIA_TIME, format_ist, india_date
-from .models import AppSettings, AssignedSite, Attendance, AttendancePolicy, AuditLog, CandidateReferral, DailyWorkStatus, Invoice, LeaveAllowanceAccount, LeaveRequest, MonthlyLeaveEntitlement, Project, PurchaseOrder, REPORT_COMPANY_NAME, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
+from .models import AppSettings, AssignedSite, Attendance, AttendancePolicy, AuditLog, BLOOD_GROUPS, CandidateReferral, DailyWorkStatus, Invoice, LeaveAllowanceAccount, LeaveRequest, MonthlyLeaveEntitlement, Project, PurchaseOrder, REPORT_COMPANY_NAME, SiteAssignment, SiteReport, SubmittedReport, SubmittedReportVersion, User, utcnow
 from .work_status import approved_leave_today, attendance_summary, leave_overlap, month_bounds, monthly_leave_balance
 from .services import (
     generate_invoice_pdf,
@@ -776,6 +776,49 @@ def live_status():
     )
 
 
+def _employee_details(employee=None):
+    details = {}
+    for field, label, maximum in (
+        ("address", "Address", 1000),
+        ("emergency_contact_no", "Emergency contact number", 40),
+        ("blood_group", "Blood group", 3),
+        ("laptop_serial_no", "Laptop serial number", 120),
+        ("employee_code", "Employee ID", 80),
+    ):
+        existing = getattr(employee, field, "") or ""
+        value = request.form.get(field, existing).strip()
+        if field in ("blood_group", "employee_code"):
+            value = value.upper()
+        if len(value) > maximum:
+            raise ValueError(f"{label} must be at most {maximum} characters.")
+        details[field] = value
+    if details["blood_group"] and details["blood_group"] not in BLOOD_GROUPS:
+        raise ValueError("Select a valid blood group or leave it unspecified.")
+    if "birthday" in request.form:
+        birthday = request.form["birthday"].strip()
+        if birthday:
+            try:
+                if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", birthday):
+                    raise ValueError
+                details["birthday"] = date.fromisoformat(birthday)
+            except ValueError:
+                raise ValueError("Enter a valid birthday in YYYY-MM-DD format.") from None
+            if details["birthday"] > india_date(utcnow()):
+                raise ValueError("Birthday cannot be in the future.")
+        else:
+            details["birthday"] = None
+    else:
+        details["birthday"] = employee.birthday if employee is not None else None
+    details["employee_code"] = details["employee_code"] or None
+    if details["employee_code"]:
+        duplicate = User.query.filter_by(employee_code=details["employee_code"])
+        if employee is not None:
+            duplicate = duplicate.filter(User.id != employee.id)
+        if duplicate.first():
+            raise ValueError("An account already uses that Employee ID.")
+    return details
+
+
 @bp.route("/admin/employees", methods=["GET", "POST"])
 @admin_required
 def employees():
@@ -794,21 +837,32 @@ def employees():
         elif User.query.filter_by(email=email).first():
             flash("An account already uses that email address.", "danger")
         else:
-            employee = User(
-                name=name,
-                email=email,
-                mobile=mobile,
-                designation=designation,
-                role="employee",
-            )
-            employee.set_password(password)
-            db.session.add(employee)
-            write_audit(current_user, "employee_created", email)
-            db.session.commit()
-            flash("Employee created.", "success")
-            return redirect(url_for("main.employees"))
+            try:
+                details = _employee_details()
+            except ValueError as error:
+                flash(str(error), "danger")
+            else:
+                employee = User(
+                    name=name, email=email, mobile=mobile,
+                    designation=designation, role="employee", **details,
+                )
+                employee.set_password(password)
+                db.session.add(employee)
+                write_audit(current_user, "employee_created", email)
+                try:
+                    db.session.commit()
+                except IntegrityError:
+                    db.session.rollback()
+                    current_app.logger.warning("Employee creation conflicted with an existing unique account field.")
+                    flash("Email or Employee ID is already in use. Review the details and try again.", "danger")
+                else:
+                    flash("Employee created.", "success")
+                    return redirect(url_for("main.employees"))
     records = User.query.filter_by(role="employee").order_by(User.name).all()
-    return render_template("employees.html", employees=records)
+    return render_template(
+        "employees.html", employees=records, blood_groups=BLOOD_GROUPS,
+        birthday_max=india_date(utcnow()).isoformat(),
+    )
 
 
 @bp.route("/admin/employees/<int:user_id>/edit", methods=["POST"])
@@ -827,11 +881,24 @@ def edit_employee(user_id):
     if not all((name, email, mobile, designation)) or duplicate:
         flash("Enter valid employee details and a unique email address.", "danger")
     else:
-        employee.name, employee.email = name, email
-        employee.mobile, employee.designation = mobile, designation
-        write_audit(current_user, "employee_updated", email)
-        db.session.commit()
-        flash("Employee details updated.", "success")
+        try:
+            details = _employee_details(employee)
+        except ValueError as error:
+            flash(str(error), "danger")
+        else:
+            employee.name, employee.email = name, email
+            employee.mobile, employee.designation = mobile, designation
+            for field, value in details.items():
+                setattr(employee, field, value)
+            write_audit(current_user, "employee_updated", email)
+            try:
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                current_app.logger.warning("Employee update conflicted with an existing unique account field.")
+                flash("Email or Employee ID is already in use. Review the details and try again.", "danger")
+            else:
+                flash("Employee details updated.", "success")
     return redirect(url_for("main.employees"))
 
 
@@ -1384,8 +1451,8 @@ def edit_work_status(status_id):
 
 
 def _render_leaves(today, selected_status="all"):
-    start_raw = request.args.get("from_date", "").strip()
-    end_raw = request.args.get("to_date", "").strip()
+    start_raw = request.args.get("from_date", today.isoformat()).strip()
+    end_raw = request.args.get("to_date", today.isoformat()).strip()
     try:
         start = date.fromisoformat(start_raw) if start_raw else None
         end = date.fromisoformat(end_raw) if end_raw else None
@@ -1515,8 +1582,8 @@ def admin_leave_form(leave_id=None):
     employees = User.query.filter_by(role="employee").order_by(User.name).all()
     values = {
         "employee_id": str(leave.employee_id) if leave else "",
-        "start_date": leave.start_date.isoformat() if leave else "",
-        "end_date": leave.end_date.isoformat() if leave else "",
+        "start_date": leave.start_date.isoformat() if leave else india_date(utcnow()).isoformat(),
+        "end_date": leave.end_date.isoformat() if leave else india_date(utcnow()).isoformat(),
         "period": leave.period if leave else "full",
         "reason": leave.reason if leave else "",
     }
@@ -2038,8 +2105,8 @@ def submitted_report_form(report_id=None):
     current = report.current_version if report else None
     values = {
         "site_id": str(report.site_id) if report and report.site_id else "",
-        "start_date": current.start_date.isoformat() if current else "",
-        "end_date": current.end_date.isoformat() if current else "",
+        "start_date": current.start_date.isoformat() if current else india_date(utcnow()).isoformat(),
+        "end_date": current.end_date.isoformat() if current else india_date(utcnow()).isoformat(),
         "total_mandays": current.total_mandays if current else "",
         "revision_number": report.revision_number if report else "",
     }

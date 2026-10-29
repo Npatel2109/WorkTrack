@@ -122,6 +122,7 @@ def create_app(test_config=None):
     @app.context_processor
     def inject_year():
         from .models import AppSettings, Attendance, REPORT_COMPANY_NAME
+        from .timeutils import india_date
 
         active = None
         if current_user.is_authenticated and not current_user.is_admin:
@@ -129,6 +130,7 @@ def create_app(test_config=None):
         settings = db.session.get(AppSettings, 1)
         return {
             "current_year": datetime.now().year,
+            "current_date": india_date(datetime.now(timezone.utc)).isoformat(),
             "tracking_attendance": active,
             "brand_logo_filename": settings.brand_logo_filename if settings else None,
             "report_company_name": REPORT_COMPANY_NAME,

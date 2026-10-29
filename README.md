@@ -15,6 +15,45 @@ visit workflows share the updated styling without changing permissions or data.
 Keyboard focus, skip navigation and reduced-motion preferences are supported.
 No database migration or additional dependencies are needed for this UI refresh.
 
+### If website and Android still show the old design
+
+The Android WebView loads the same live server as the website; a local preview
+does not deploy changes to that server. Pulling code is not enough if Gunicorn
+workers are still running the previous application. On Ubuntu, back up the
+database, stop the actual app service for migrations, pull the release, run
+`./venv/bin/python3 -m flask --app wsgi db upgrade` and start the app service again.
+Find the service name with
+`systemctl list-units --type=service --all | grep -Ei 'worktrack|gunicorn'`;
+do not reuse an old process ID. Reloading Nginx alone does not reload Gunicorn.
+Then hard-refresh the browser and tap Reload in Android. The updated login page
+has a `workspace-topbar` and requests `app.css?v=20261029`; `app-navbar` indicates
+that old HTML is still being served. The moon button switches between light and
+dark mode; mobile uses a menu drawer instead of the desktop sidebar.
+
+### Admin employee details
+
+Run the database migration before starting this version. Admin employee create
+and edit forms include optional Address (1,000 characters), Emergency Contact No
+(40), Blood Group (the eight ABO/Rh groups or unspecified), Laptop serial no
+(120), Employee ID (80) and Birthday (date of birth). All six additional fields
+are optional; birthday can be left blank or cleared and cannot be a future date.
+The existing required account fields remain unchanged.
+Employee IDs are trimmed, normalized to uppercase
+and unique when supplied; empty IDs are stored as null, so existing employees
+can remain unspecified. This business ID does not replace internal user IDs or
+change login credentials. Personal details remain in admin employee management,
+not shared attendance APIs, employee pages or exports.
+The site catalog is labeled **Site** / **Add Site**; the separate Projects list
+and project-name association remain unchanged.
+
+Date selectors for admin and employee pages default to the current date in IST
+when opening a new form, including unspecified birthdays. Saved dates and dates
+entered on a failed submission are preserved; optional dates can still be cleared.
+Confirm the actual birthday before saving, or clear it if unknown. Leave date
+filters initially select today and filter the displayed results accordingly;
+clear both dates and apply filters to view the full history. Month selectors
+continue to default to the current month.
+
 ## Requirements
 
 - Python 3.10+
@@ -267,8 +306,8 @@ they were billable. Individual/merged PDFs remain available to admins.
 
 Admins manage the reusable project-name list in **Projects** and select a
 project in site details. Existing site project names are transferred into this
-list by the migration. The existing **Sites** page appears as **Project** in
-admin navigation, and its **Add Project** form still creates a site entry.
+list by the migration. The site catalog appears as **Site** in admin navigation,
+and its **Add Site** form creates a site entry.
 Reporting company is fixed to **Blackpurple automation**. Commissioning
 manager, project manager and up to five remarks remain optional site report
 details; updates apply to future exports.

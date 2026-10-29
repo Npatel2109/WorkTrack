@@ -6,6 +6,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from .extensions import db, login_manager
 
 REPORT_COMPANY_NAME = "Blackpurple automation"
+BLOOD_GROUPS = ("A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-")
 
 
 def utcnow():
@@ -18,6 +19,12 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     mobile = db.Column(db.String(40), nullable=False)
     designation = db.Column(db.String(120), nullable=False, default="Engineer")
+    address = db.Column(db.String(1000), nullable=False, default="", server_default="")
+    emergency_contact_no = db.Column(db.String(40), nullable=False, default="", server_default="")
+    blood_group = db.Column(db.String(3), nullable=False, default="", server_default="")
+    laptop_serial_no = db.Column(db.String(120), nullable=False, default="", server_default="")
+    employee_code = db.Column(db.String(80), unique=True)
+    birthday = db.Column(db.Date, nullable=True)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), nullable=False, default="employee")
     created_date = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
