@@ -86,25 +86,29 @@ are retained; row heights expand for longer multiline activity text.
 
 After a successful employee login, a lightweight animated robot welcomes the
 employee by first name and reveals the dashboard as soon as the spoken greeting
-finishes. If speech is unavailable, blocked, or fails, a four-second fallback
-reveals the dashboard; a 20-second safety timeout handles stalled speech. Skip or
-Escape dismisses it immediately. Admin logins and ordinary dashboard reloads
-do not trigger it. A per-employee local preference limits it to once per IST day
-in that browser/Android WebView; another device or cleared browser storage can
-show it again. If storage is blocked, the greeting explains that it may repeat.
+finishes. It appears after every successful employee login, including repeated
+logins on the same day. If speech is unavailable, blocked, fails or stalls, it
+stays open with instructions to retry voice or **Skip robot**; it never silently
+advances to the dashboard. Skip or Escape dismisses the entire robot immediately
+and stops speech. Admin logins and ordinary dashboard reloads do not trigger it.
 Reduced-motion settings disable the robot animation. JavaScript-disabled or
 older browsers without dialog support go directly to the usable dashboard.
 
 Device/browser speech synthesis attempts the English greeting; **Play voice**
-retries when automatic audio is blocked. Voice availability varies by device,
-and text/Skip remain usable without it. No external API key or video download is
-required. The selected speech engine may use its own online services.
+retries directly from a tap when mobile browsers block automatic audio. Browsers
+cannot bypass this restriction, muted media volume or unavailable speech engines.
+Android app version 1.5.0 (versionCode 7) adds native text-to-speech because WebView
+speech synthesis is not reliably available; install the rebuilt APK, enable an
+English voice in Android text-to-speech settings and turn up media volume.
+Voice is always attempted; there is no mute/text-only robot mode. Users can skip
+the whole robot instead. No external API key or video download is required.
+The selected speech engine may use its own online services.
 
 After each successful **Submit report & complete visit**, the same robot says
 "Thank you, [first name]! Your site report has been submitted. Thank you for your hard work!"
 on the employee dashboard. It closes when speech finishes, with the same
-fallback timers, **Play voice**, Escape and **Continue to dashboard** controls.
-This acknowledgement is per submitted report, not limited by the daily login
+voice retry, **Play voice**, Escape and **Skip robot** controls.
+This acknowledgement is per submitted report, independent of the login
 greeting, and does not repeat on dashboard reloads or report validation errors.
 Ending a site visit alone does not trigger it: the report must be successfully
 submitted first. Stop times and report submission behavior are unchanged.

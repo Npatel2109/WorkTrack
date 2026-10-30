@@ -21,9 +21,9 @@
   <p class="eyebrow">YOUR WORKDAY SIDEKICK</p>
   <h2 id="robot-welcome-title">{{ 'Thank you' if robot_thank_you else 'Hello' }}, {{ current_user.name.split(' ')[0] }}!</h2>
   <p id="robot-welcome-message">{{ 'Your site report has been submitted. Thank you for your hard work!' if robot_thank_you else "What are you doing today? Let's make it a great day!" }}</p>
-  <p class="small text-secondary" id="robot-voice-status" role="status">Opening your dashboard in a moment...</p>
+  <p class="small text-secondary" id="robot-voice-status" role="status">Starting robot voice. If sound is blocked, tap Play voice or skip the robot.</p>
   <div class="d-flex justify-content-center flex-wrap gap-2">
     <button class="btn btn-outline-primary" type="button" id="robot-play-voice">Play voice</button>
-    <button class="btn btn-primary" type="button" id="robot-skip">{{ 'Continue to dashboard' if robot_thank_you else 'Skip to dashboard' }}</button>
+    <button class="btn btn-primary" type="button" id="robot-skip">Skip robot</button>
   </div>
 </dialog>

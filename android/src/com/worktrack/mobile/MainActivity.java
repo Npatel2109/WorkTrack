@@ -10,6 +10,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.media.AudioAttributes;
 import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Bundle;
@@ -19,6 +20,8 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.speech.RecognizerIntent;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.view.Gravity;
 import android.view.View;
 import android.webkit.CookieManager;
@@ -42,6 +45,7 @@ import android.widget.Toast;
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.Objects;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.json.JSONObject;
@@ -53,6 +57,14 @@ public class MainActivity extends Activity {
     private static final int MONITOR_PERMISSION_REQUEST = 13;
     private static final int SPEECH_REQUEST = 14;
     private int speechNavigation = -1;
+    private TextToSpeech robotVoice;
+    private boolean robotVoiceInitialized;
+    private boolean robotVoiceReady;
+    private String robotVoiceId;
+    private String robotVoiceText;
+    private String robotVoiceToken;
+    private long robotVoiceSequence;
+    private int robotVoiceNavigation;
     private final String server = AppConfig.SERVER;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable retry = this::retryConnection;
@@ -89,6 +101,27 @@ public class MainActivity extends Activity {
         // Older builds let users type a server address; it is now fixed.
         getSharedPreferences("worktrack", MODE_PRIVATE).edit().remove("server").apply();
         showApp();
+        robotVoice = new TextToSpeech(this, result -> handler.post(() -> {
+            if (monitorDestroyed) return;
+            robotVoiceInitialized = true;
+            robotVoiceReady = result == TextToSpeech.SUCCESS;
+            if (robotVoiceReady) {
+                robotVoice.setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+                int language = robotVoice.setLanguage(new Locale("en", "IN"));
+                if (language < TextToSpeech.LANG_AVAILABLE) {
+                    language = robotVoice.setLanguage(Locale.ENGLISH);
+                }
+                robotVoiceReady = language >= TextToSpeech.LANG_AVAILABLE;
+                robotVoice.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                    @Override public void onStart(String id) { robotVoiceResult(id, "start"); }
+                    @Override public void onDone(String id) { robotVoiceResult(id, "done"); }
+                    @Override public void onError(String id) { robotVoiceResult(id, "error"); }
+                });
+            }
+            if (robotVoiceId != null) speakRobot();
+        }));
     }
 
     private Button button(String text, View.OnClickListener action) {
@@ -177,6 +210,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                stopRobot();
                 navigationGeneration++;
                 pageFailed = false;
                 if (sameOrigin(url)) lastUrl = url;
@@ -186,6 +220,31 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
+                if ("worktrack-robot".equals(request.getUrl().getScheme())) {
+                    if (request.isForMainFrame() && sameOrigin(view.getUrl())) {
+                        Uri command = request.getUrl();
+                        if ("stop".equals(command.getHost())) {
+                            stopRobot();
+                        } else if ("speak".equals(command.getHost())) {
+                            String text = command.getQueryParameter("text");
+                            String id = command.getQueryParameter("id");
+                            if (text == null || text.trim().isEmpty() || text.length() > 1000
+                                    || id == null || !id.matches("[0-9]{1,9}")) {
+                                Toast.makeText(MainActivity.this, "Invalid robot voice request. Skip the robot and retry login.", Toast.LENGTH_LONG).show();
+                                return true;
+                            }
+                            stopRobot();
+                            robotVoiceId = id;
+                            robotVoiceText = text;
+                            robotVoiceToken = String.valueOf(++robotVoiceSequence);
+                            robotVoiceNavigation = navigationGeneration;
+                            if (robotVoiceInitialized) speakRobot();
+                        }
+                    } else {
+                        Toast.makeText(MainActivity.this, "Robot voice is only available from WorkTrack.", Toast.LENGTH_LONG).show();
+                    }
+                    return true;
+                }
                 if ("worktrack-voice".equals(request.getUrl().getScheme())) {
                     if (request.isForMainFrame() && request.hasGesture()
                             && sameOrigin(view.getUrl()) && "worktrack-voice://start".equals(url)) {
@@ -212,6 +271,8 @@ public class MainActivity extends Activity {
                 if (sameOrigin(url) && !pageFailed) {
                     webView.evaluateJavascript(
                         "window.worktrackNativeSpeech=true;window.dispatchEvent(new Event('worktrack-speech-ready'));", null);
+                    webView.evaluateJavascript(
+                        "window.worktrackNativeRobot=true;window.dispatchEvent(new Event('worktrack-robot-ready'));", null);
                     syncVisit();
                 }
             }
@@ -351,6 +412,37 @@ public class MainActivity extends Activity {
             }
         });
         webView.loadUrl(server + "/login");
+    }
+
+    private void stopRobot() {
+        robotVoiceId = null;
+        robotVoiceText = null;
+        robotVoiceToken = null;
+        if (robotVoice != null) robotVoice.stop();
+    }
+
+    private void speakRobot() {
+        String id = robotVoiceToken;
+        if (id == null) return;
+        if (!robotVoiceReady || !foreground) {
+            robotVoiceResult(id, "error");
+            return;
+        }
+        Bundle options = new Bundle();
+        options.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f);
+        robotVoice.setSpeechRate(1.1f);
+        if (robotVoice.speak(robotVoiceText, TextToSpeech.QUEUE_FLUSH, options, id) == TextToSpeech.ERROR) {
+            robotVoiceResult(id, "error");
+        }
+    }
+
+    private void robotVoiceResult(String id, String state) {
+        handler.post(() -> {
+            if (monitorDestroyed || webView == null || !id.equals(robotVoiceToken)
+                    || robotVoiceNavigation != navigationGeneration || !sameOrigin(webView.getUrl())) return;
+            webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('worktrack-robot-result',{detail:{id:"
+                + JSONObject.quote(robotVoiceId) + ",state:" + JSONObject.quote(state) + "}}));", null);
+        });
     }
 
     private void startReportSpeech() {
@@ -562,6 +654,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        if (robotVoiceToken != null) robotVoiceResult(robotVoiceToken, "error");
+        if (robotVoice != null) robotVoice.stop();
         foreground = false;
         handler.removeCallbacks(monitorPoll);
         if (webView != null) webView.onPause();
@@ -580,6 +674,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         monitorDestroyed = true;
+        stopRobot();
+        if (robotVoice != null) robotVoice.shutdown();
         handler.removeCallbacks(monitorPoll);
         monitorNetwork.shutdownNow();
         handler.removeCallbacks(retry);

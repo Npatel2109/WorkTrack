@@ -4,28 +4,50 @@
   const skip = document.getElementById("robot-skip");
   const play = document.getElementById("robot-play-voice");
   const status = document.getElementById("robot-voice-status");
-  const dailyWelcome = dialog.dataset.kind !== "thank-you";
-  const key = `worktrack-welcome-${dialog.dataset.employee}`;
-  let storageAvailable = true;
-  try {
-    if (dailyWelcome && localStorage.getItem(key) === dialog.dataset.day) return;
-  } catch (error) {
-    storageAvailable = false;
-    console.warn("Daily welcome preference could not be read.", error.name);
-  }
   const previousFocus = document.activeElement;
   const synth = window.speechSynthesis;
   let utterance = null;
+  let nativeId = null;
+  let requestNumber = 0;
   let closed = false;
   let started = false;
   let timer;
   let voiceTimer;
+  const retryMessage = "Voice could not play. Turn up media volume and tap Play voice, or Skip robot.";
+  const stopSpeech = () => {
+    if (utterance && synth) {
+      utterance.onstart = null;
+      utterance.onend = null;
+      utterance.onerror = null;
+      synth.cancel();
+      utterance = null;
+    }
+    if (nativeId !== null) {
+      window.location.href = "worktrack-robot://stop";
+      nativeId = null;
+    }
+  };
+  const failed = () => {
+    if (closed) return;
+    clearTimeout(timer);
+    clearTimeout(voiceTimer);
+    stopSpeech();
+    status.textContent = retryMessage;
+  };
+  const speechStarted = () => {
+    if (closed) return;
+    started = true;
+    clearTimeout(timer);
+    clearTimeout(voiceTimer);
+    timer = setTimeout(failed, 20000);
+    status.textContent = "Robot is speaking. Turn up media volume if you cannot hear it.";
+  };
   const finish = () => {
     if (closed) return;
     closed = true;
     clearTimeout(timer);
     clearTimeout(voiceTimer);
-    if (utterance && synth) synth.cancel();
+    stopSpeech();
     if (dialog.open) dialog.close();
     const target = previousFocus && previousFocus !== document.body
       ? previousFocus : document.getElementById("main-content");
@@ -33,59 +55,47 @@
   };
   const speak = () => {
     if (closed) return;
-    if (!synth || !window.SpeechSynthesisUtterance) {
-      play.disabled = true;
-      status.textContent = "Voice is unavailable on this device. Enjoy your day!";
+    stopSpeech();
+    clearTimeout(timer);
+    clearTimeout(voiceTimer);
+    started = false;
+    const text = `${document.getElementById("robot-welcome-title").textContent} ${document.getElementById("robot-welcome-message").textContent}`;
+    status.textContent = "Starting robot voice...";
+    timer = setTimeout(failed, 20000);
+    voiceTimer = setTimeout(() => {
+      if (!closed && !started) status.textContent = "Tap Play voice to allow sound on mobile, or Skip robot.";
+    }, 700);
+    if (window.worktrackNativeRobot === true) {
+      nativeId = String(++requestNumber);
+      window.location.href = `worktrack-robot://speak?id=${nativeId}&text=${encodeURIComponent(text)}`;
       return;
     }
-    if (utterance) {
-      utterance.onstart = null;
-      utterance.onend = null;
-      utterance.onerror = null;
-      synth.cancel();
+    if (!synth || !window.SpeechSynthesisUtterance) {
+      clearTimeout(timer);
+      clearTimeout(voiceTimer);
+      status.textContent = "Voice is unavailable here. Update the Android app or use a supported browser, or Skip robot.";
+      return;
     }
-    clearTimeout(timer);
-    timer = setTimeout(finish, 4000);
-    utterance = new window.SpeechSynthesisUtterance(
-      `${document.getElementById("robot-welcome-title").textContent} ${document.getElementById("robot-welcome-message").textContent}`
-    );
+    utterance = new window.SpeechSynthesisUtterance(text);
     utterance.lang = "en-IN";
     utterance.rate = 1.1;
-    started = false;
-    utterance.onstart = () => {
-      if (closed) return;
-      started = true;
-      clearTimeout(timer);
-      timer = setTimeout(finish, 20000);
-      status.textContent = "Your dashboard is ready. Have a great day!";
-    };
+    utterance.volume = 1;
+    const voices = synth.getVoices();
+    utterance.voice = voices.find((voice) => /^en[-_]IN$/i.test(voice.lang))
+      || voices.find((voice) => /^en[-_]/i.test(voice.lang)) || null;
+    utterance.onstart = speechStarted;
     utterance.onend = finish;
-    utterance.onerror = () => {
-      if (closed) return;
-      clearTimeout(timer);
-      timer = setTimeout(finish, 4000);
-      status.textContent = "Voice could not play. Tap Play voice to retry, or continue to your dashboard.";
-    };
+    utterance.onerror = failed;
     try {
+      synth.resume();
       synth.speak(utterance);
-      clearTimeout(voiceTimer);
-      voiceTimer = setTimeout(() => {
-        if (!closed && !started) status.textContent = "Tap Play voice if your browser blocks automatic audio.";
-      }, 700);
     } catch (error) {
-      status.textContent = "Voice could not play. Tap Play voice to retry.";
+      failed();
       console.warn("Employee welcome voice could not start.", error.name);
     }
   };
   dialog.showModal();
-  try {
-    if (dailyWelcome && storageAvailable) localStorage.setItem(key, dialog.dataset.day);
-  } catch (error) {
-    storageAvailable = false;
-    console.warn("Daily welcome preference could not be saved.", error.name);
-  }
-  skip.focus();
-  timer = setTimeout(finish, 4000);
+  play.focus();
   skip.addEventListener("click", finish);
   dialog.addEventListener("cancel", (event) => {
     event.preventDefault();
@@ -93,7 +103,15 @@
   });
   dialog.addEventListener("close", finish);
   window.addEventListener("pagehide", finish);
+  window.addEventListener("worktrack-robot-ready", () => {
+    if (!closed) speak();
+  });
+  window.addEventListener("worktrack-robot-result", (event) => {
+    if (closed || nativeId === null || event.detail?.id !== nativeId) return;
+    if (event.detail.state === "start") speechStarted();
+    else if (event.detail.state === "done") finish();
+    else failed();
+  });
   play.addEventListener("click", speak);
   speak();
-  if (!storageAvailable) status.textContent = "Daily greeting preference cannot be saved on this device; this may appear again after login.";
 })();

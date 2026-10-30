@@ -29,8 +29,8 @@ To also update the distributable included in this repository:
 ```
 
 This writes `android/downloads/worktrack.apk`, which is downloaded to EC2 by
-`git pull`. The included version 1.4.0 (versionCode 6) is development-signed for
-testing, not a production release. Never commit signing keys.
+`git pull`. The included version 1.5.0 (versionCode 7) adds native robot speech
+and is development-signed for testing, not a production release. Never commit signing keys.
 
 By default this creates a **development-signed APK for testing**, with a local
 development keystore under `%LOCALAPPDATA%\WorkTrackAndroid\keys`. Before real
@@ -98,6 +98,23 @@ text only to the same page/navigation. Cancelling or missing speech services
 shows a message without replacing the employee's text. No JavaScript interface
 is exposed to web frames. New speech is appended; employees can edit it or type
 normally before submitting. Hindi/Gujarati translation is not included.
+
+## Robot voice
+
+Version 1.5.0 adds Android text-to-speech for the login and report-completion robot.
+Rebuild and install this APK as well as deploying the web changes; old WebViews
+may not provide browser speech synthesis. Enable an English Android TTS voice and
+turn up media volume. No microphone permission or speech API key is needed.
+Robot speech uses media audio, does not override device volume, and stops on
+skip, navigation, backgrounding or Activity destruction.
+
+The robot attempts voice on every employee login, even on the same day, and
+closes when speech finishes. Failed or unavailable speech leaves **Play voice**
+and **Skip robot** available rather than silently dismissing it. Only main-frame
+`worktrack-robot://speak` / `stop` requests from the fixed trusted server are
+accepted. Bounded text is passed to the device TTS engine; safely encoded progress
+events return only to the requesting navigation. No JavaScript interface is
+exposed to frames.
 
 ## Android active-visit outside-site reminders
 
