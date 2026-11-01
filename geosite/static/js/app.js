@@ -25,6 +25,26 @@
     } catch (error) { console.warn("Theme preference could not be saved.", error); }
   });
 
+  const sidebarToggle = document.getElementById("sidebar-toggle");
+  const applySidebarState = (collapsed) => {
+    document.body.classList.toggle("sidebar-collapsed", collapsed);
+    sidebarToggle?.setAttribute("aria-expanded", String(!collapsed));
+    sidebarToggle?.setAttribute("aria-label", collapsed ? "Show navigation" : "Hide navigation");
+  };
+  let sidebarCollapsed = false;
+  try { sidebarCollapsed = localStorage.getItem("geosite-sidebar") === "collapsed"; } catch (error) {}
+  applySidebarState(sidebarCollapsed);
+  sidebarToggle?.addEventListener("click", () => {
+    if (window.innerWidth < 992) {
+      const sidebar = document.getElementById("workspaceNav");
+      if (sidebar && window.bootstrap?.Offcanvas) window.bootstrap.Offcanvas.getOrCreateInstance(sidebar).show();
+      return;
+    }
+    sidebarCollapsed = !document.body.classList.contains("sidebar-collapsed");
+    applySidebarState(sidebarCollapsed);
+    try { localStorage.setItem("geosite-sidebar", sidebarCollapsed ? "collapsed" : "expanded"); } catch (error) {}
+  });
+
   window.GeoSite = {
     renderSiteMap() {
       const element = document.getElementById("live-map");
