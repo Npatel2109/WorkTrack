@@ -1,0 +1,17 @@
+@extends('layouts.app')
+@section('content')
+<h1 class="h3">Employees</h1>
+<div class="card card-body mb-4"><h2 class="h5">{{ $editing ? 'Edit employee' : 'Create employee' }}</h2>
+<form method="post" action="{{ url($editing ? '/admin/employees/'.$editing->id.'/edit' : '/admin/employees') }}">@csrf<div class="row g-3">
+@foreach(['name'=>['Name',120],'email'=>['Email',255],'mobile'=>['Mobile',40],'designation'=>['Designation',120],'employee_code'=>['Employee ID',80],'address'=>['Address',1000],'emergency_contact_no'=>['Emergency contact',40],'laptop_serial_no'=>['Laptop serial number',120]] as $field=>$meta)
+<div class="col-md-6"><label class="form-label" for="{{ $field }}">{{ $meta[0] }}</label><input class="form-control" id="{{ $field }}" name="{{ $field }}" type="{{ $field === 'email' ? 'email' : 'text' }}" value="{{ old($field, $editing->$field ?? ($field === 'designation' ? 'Engineer' : '')) }}" maxlength="{{ $meta[1] }}" @required(in_array($field,['name','email','mobile','designation']))></div>@endforeach
+<div class="col-md-6"><label class="form-label" for="blood_group">Blood group</label><select class="form-select" id="blood_group" name="blood_group"><option value="">Unspecified</option>@foreach(['A+','A-','B+','B-','AB+','AB-','O+','O-'] as $group)<option @selected(old('blood_group',$editing->blood_group ?? '')===$group)>{{ $group }}</option>@endforeach</select></div>
+<div class="col-md-6"><label class="form-label" for="birthday">Birthday</label><input class="form-control" type="date" id="birthday" name="birthday" value="{{ old('birthday',$editing->birthday ?? '') }}" max="{{ \App\Services\WorkTrack::today()->toDateString() }}"></div>
+<div class="col-md-6"><label class="form-label" for="password">{{ $editing ? 'New password (optional)' : 'Password' }}</label><input class="form-control" autocomplete="new-password" type="password" id="password" name="password" minlength="12" maxlength="255" @required(!$editing)></div>
+</div><button class="btn btn-primary mt-3">Save employee</button>@if($editing)<a class="btn btn-secondary mt-3" href="{{ url('/admin/employees') }}">Cancel</a>@endif</form></div>
+<div class="table-responsive"><table class="table table-striped"><thead><tr><th>Employee</th><th>Contact</th><th>Designation</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+@forelse($employees as $employee)<tr><td>{{ $employee->name }}<br>{{ $employee->employee_code }}</td><td>{{ $employee->email }}<br>{{ $employee->mobile }}</td><td>{{ $employee->designation }}</td><td>{{ $employee->is_active ? 'Active' : 'Inactive' }}</td><td><a class="btn btn-sm btn-outline-primary" href="{{ url('/admin/employees/'.$employee->id.'/edit') }}">Edit</a><a class="btn btn-sm btn-outline-primary" href="{{ url('/admin/assignments?employee_id='.$employee->id) }}">Sites</a>
+<form class="d-inline" method="post" action="{{ url('/admin/employees/'.$employee->id.'/delete') }}">@csrf<button class="btn btn-sm btn-outline-danger">Delete / deactivate</button></form>
+<details class="mt-2"><summary>Reset password</summary><form method="post" action="{{ url('/admin/employees/'.$employee->id.'/reset-password') }}">@csrf<label class="form-label" for="reset-{{ $employee->id }}">New password</label><input class="form-control" id="reset-{{ $employee->id }}" name="password" type="password" autocomplete="new-password" minlength="12" required><button class="btn btn-sm btn-warning mt-1">Reset</button></form></details></td></tr>@empty<tr><td colspan="5">No employees.</td></tr>@endforelse
+</tbody></table></div>
+@endsection

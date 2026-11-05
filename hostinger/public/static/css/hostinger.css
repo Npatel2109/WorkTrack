@@ -1,0 +1,18 @@
+@media (min-width: 992px) {
+  .admin-workspace .workspace-main { margin-left: 0 !important; }
+  .admin-workspace .workspace-sidebar.offcanvas {
+    width: 252px;
+    --bs-offcanvas-width: 252px;
+    transform: translateX(-100%) !important;
+    visibility: hidden !important;
+  }
+  .admin-workspace .workspace-sidebar.offcanvas.show,
+  .admin-workspace .workspace-sidebar.offcanvas.showing {
+    transform: none !important;
+    visibility: visible !important;
+  }
+  .admin-workspace.sidebar-collapsed .workspace-link > span { display: inline; }
+  .admin-workspace.sidebar-collapsed .workspace-link { justify-content: flex-start; }
+  .employee-workspace.sidebar-collapsed .sidebar-identity { display: none; }
+}
+.workspace-sidebar .offcanvas-body { overflow-y: auto; }

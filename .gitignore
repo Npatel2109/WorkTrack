@@ -11,3 +11,4 @@ android/build/
 *.keystore
 *.jks
 *.pem
+hostinger/dist/

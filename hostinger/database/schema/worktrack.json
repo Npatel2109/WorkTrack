@@ -1,0 +1,1709 @@
+[
+  {
+    "name": "app_settings",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "brand_logo_filename",
+        "type": "string",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false,
+        "length": 40
+      },
+      {
+        "name": "android_server_url",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 500,
+        "default": ""
+      },
+      {
+        "name": "android_download_enabled",
+        "type": "boolean",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": false
+      },
+      {
+        "name": "public_base_url",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 500,
+        "default": ""
+      },
+      {
+        "name": "mail_server",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255,
+        "default": ""
+      },
+      {
+        "name": "mail_port",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": 465
+      },
+      {
+        "name": "mail_security",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 10,
+        "default": "ssl"
+      },
+      {
+        "name": "mail_username",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255,
+        "default": ""
+      },
+      {
+        "name": "mail_password",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 500,
+        "default": ""
+      },
+      {
+        "name": "mail_sender",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255,
+        "default": ""
+      },
+      {
+        "name": "referral_notification_email",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255,
+        "default": ""
+      },
+      {
+        "name": "po_notification_email",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255,
+        "default": ""
+      }
+    ],
+    "unique": [],
+    "foreign": []
+  },
+  {
+    "name": "attendance_policy",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "effective_from",
+        "type": "date",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      }
+    ],
+    "unique": [],
+    "foreign": []
+  },
+  {
+    "name": "project",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "project_number",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 80
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 250
+      }
+    ],
+    "unique": [
+      [
+        "project_number"
+      ],
+      [
+        "name"
+      ]
+    ],
+    "foreign": []
+  },
+  {
+    "name": "user",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 120
+      },
+      {
+        "name": "email",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255
+      },
+      {
+        "name": "mobile",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 40
+      },
+      {
+        "name": "designation",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 120,
+        "default": "Engineer"
+      },
+      {
+        "name": "address",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 1000,
+        "default": ""
+      },
+      {
+        "name": "emergency_contact_no",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 40,
+        "default": ""
+      },
+      {
+        "name": "blood_group",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 3,
+        "default": ""
+      },
+      {
+        "name": "laptop_serial_no",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 120,
+        "default": ""
+      },
+      {
+        "name": "employee_code",
+        "type": "string",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false,
+        "length": 80
+      },
+      {
+        "name": "birthday",
+        "type": "date",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "password_hash",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255
+      },
+      {
+        "name": "role",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 20,
+        "default": "employee"
+      },
+      {
+        "name": "created_date",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      },
+      {
+        "name": "is_active",
+        "type": "boolean",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": true
+      },
+      {
+        "name": "auth_version",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": 0
+      }
+    ],
+    "unique": [
+      [
+        "employee_code"
+      ],
+      [
+        "email"
+      ]
+    ],
+    "foreign": []
+  },
+  {
+    "name": "assigned_sites",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "site_name",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 160
+      },
+      {
+        "name": "customer_name",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 160
+      },
+      {
+        "name": "project_name",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 250,
+        "default": ""
+      },
+      {
+        "name": "project_id",
+        "type": "integer",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "report_company",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 160,
+        "default": ""
+      },
+      {
+        "name": "commissioning_manager",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 120,
+        "default": ""
+      },
+      {
+        "name": "project_manager",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 120,
+        "default": ""
+      },
+      {
+        "name": "report_remarks",
+        "type": "text",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": ""
+      },
+      {
+        "name": "address",
+        "type": "text",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "latitude",
+        "type": "double",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "longitude",
+        "type": "double",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "allowed_radius",
+        "type": "double",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": 100
+      },
+      {
+        "name": "assigned_date",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      },
+      {
+        "name": "is_active",
+        "type": "boolean",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": true
+      }
+    ],
+    "unique": [],
+    "foreign": [
+      {
+        "column": "project_id",
+        "table": "project",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "audit_log",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "user_id",
+        "type": "integer",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "action",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 80
+      },
+      {
+        "name": "details",
+        "type": "text",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "ip_address",
+        "type": "string",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false,
+        "length": 45
+      },
+      {
+        "name": "created_at",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      }
+    ],
+    "unique": [],
+    "foreign": [
+      {
+        "column": "user_id",
+        "table": "user",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "candidate_referral",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "employee_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "candidate_name",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 120
+      },
+      {
+        "name": "candidate_email",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255
+      },
+      {
+        "name": "candidate_mobile",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 40,
+        "default": ""
+      },
+      {
+        "name": "resume_filename",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 40,
+        "default": ""
+      },
+      {
+        "name": "resume_original_filename",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255,
+        "default": ""
+      },
+      {
+        "name": "notes",
+        "type": "text",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": ""
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 20,
+        "default": "submitted"
+      },
+      {
+        "name": "created_at",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      }
+    ],
+    "unique": [],
+    "foreign": [
+      {
+        "column": "employee_id",
+        "table": "user",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "daily_work_status",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "employee_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "work_date",
+        "type": "date",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "work_type",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 20
+      },
+      {
+        "name": "reason",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 2000
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 20,
+        "default": "pending"
+      },
+      {
+        "name": "created_at",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      },
+      {
+        "name": "reviewed_by_id",
+        "type": "integer",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "reviewed_at",
+        "type": "dateTime",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      }
+    ],
+    "unique": [
+      [
+        "employee_id",
+        "work_date"
+      ]
+    ],
+    "foreign": [
+      {
+        "column": "employee_id",
+        "table": "user",
+        "target": "id"
+      },
+      {
+        "column": "reviewed_by_id",
+        "table": "user",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "leave_allowance_account",
+    "columns": [
+      {
+        "name": "employee_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": false
+      },
+      {
+        "name": "joining_date",
+        "type": "date",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "opening_days",
+        "type": "decimal",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "precision": 8,
+        "scale": 1,
+        "default": 0
+      },
+      {
+        "name": "updated_by_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "updated_at",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      }
+    ],
+    "unique": [],
+    "foreign": [
+      {
+        "column": "updated_by_id",
+        "table": "user",
+        "target": "id"
+      },
+      {
+        "column": "employee_id",
+        "table": "user",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "leave_request",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "employee_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "start_date",
+        "type": "date",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "end_date",
+        "type": "date",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "period",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 20
+      },
+      {
+        "name": "reason",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 2000
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 20,
+        "default": "pending"
+      },
+      {
+        "name": "created_at",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      },
+      {
+        "name": "reviewed_by_id",
+        "type": "integer",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "reviewed_at",
+        "type": "dateTime",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      }
+    ],
+    "unique": [],
+    "foreign": [
+      {
+        "column": "reviewed_by_id",
+        "table": "user",
+        "target": "id"
+      },
+      {
+        "column": "employee_id",
+        "table": "user",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "monthly_leave_entitlement",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "employee_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "month",
+        "type": "date",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "days",
+        "type": "decimal",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "precision": 6,
+        "scale": 1
+      },
+      {
+        "name": "updated_by_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "updated_at",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      }
+    ],
+    "unique": [
+      [
+        "employee_id",
+        "month"
+      ]
+    ],
+    "foreign": [
+      {
+        "column": "updated_by_id",
+        "table": "user",
+        "target": "id"
+      },
+      {
+        "column": "employee_id",
+        "table": "user",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "attendance",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "employee_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "site_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "checkin_time",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      },
+      {
+        "name": "checkout_time",
+        "type": "dateTime",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "checkin_lat",
+        "type": "double",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "checkin_lon",
+        "type": "double",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "checkout_lat",
+        "type": "double",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "checkout_lon",
+        "type": "double",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "checkin_selfie",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 20,
+        "default": "onsite"
+      },
+      {
+        "name": "site_latitude",
+        "type": "double",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "site_longitude",
+        "type": "double",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "site_radius_m",
+        "type": "double",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "checkin_distance_m",
+        "type": "double",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "checkout_distance_m",
+        "type": "double",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "checkin_location_time",
+        "type": "dateTime",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "last_location_lat",
+        "type": "double",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "last_location_lon",
+        "type": "double",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "last_location_time",
+        "type": "dateTime",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "checkout_location_time",
+        "type": "dateTime",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "checkout_location_source",
+        "type": "string",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false,
+        "length": 20
+      },
+      {
+        "name": "checkout_location_reason",
+        "type": "string",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false,
+        "length": 40
+      },
+      {
+        "name": "auto_closed",
+        "type": "boolean",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": false
+      }
+    ],
+    "unique": [],
+    "foreign": [
+      {
+        "column": "employee_id",
+        "table": "user",
+        "target": "id"
+      },
+      {
+        "column": "site_id",
+        "table": "assigned_sites",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "invoice",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "invoice_number",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 40
+      },
+      {
+        "name": "employee_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "site_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "customer_name",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 160
+      },
+      {
+        "name": "po_number",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 120,
+        "default": ""
+      },
+      {
+        "name": "po_date",
+        "type": "date",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "description",
+        "type": "text",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "start_date",
+        "type": "date",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "end_date",
+        "type": "date",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "billable_days",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "daily_rate",
+        "type": "decimal",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "precision": 12,
+        "scale": 2
+      },
+      {
+        "name": "total_amount",
+        "type": "decimal",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "precision": 14,
+        "scale": 2
+      },
+      {
+        "name": "currency",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 3,
+        "default": "INR"
+      },
+      {
+        "name": "created_at",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      },
+      {
+        "name": "created_by_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      }
+    ],
+    "unique": [
+      [
+        "invoice_number"
+      ]
+    ],
+    "foreign": [
+      {
+        "column": "site_id",
+        "table": "assigned_sites",
+        "target": "id"
+      },
+      {
+        "column": "employee_id",
+        "table": "user",
+        "target": "id"
+      },
+      {
+        "column": "created_by_id",
+        "table": "user",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "purchase_order",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "po_number",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 120
+      },
+      {
+        "name": "customer_name",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 160
+      },
+      {
+        "name": "employee_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "site_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "start_date",
+        "type": "date",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "end_date",
+        "type": "date",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "total_mandays",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": 0
+      },
+      {
+        "name": "used_mandays",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": 0
+      },
+      {
+        "name": "invoice_generated",
+        "type": "boolean",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": false
+      },
+      {
+        "name": "money_received",
+        "type": "boolean",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": false
+      },
+      {
+        "name": "completion_email_sent",
+        "type": "boolean",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": false
+      },
+      {
+        "name": "created_at",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      }
+    ],
+    "unique": [
+      [
+        "po_number"
+      ]
+    ],
+    "foreign": [
+      {
+        "column": "employee_id",
+        "table": "user",
+        "target": "id"
+      },
+      {
+        "column": "site_id",
+        "table": "assigned_sites",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "site_assignment",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "employee_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "site_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "is_active",
+        "type": "boolean",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": true
+      },
+      {
+        "name": "assigned_at",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      }
+    ],
+    "unique": [
+      [
+        "employee_id",
+        "site_id"
+      ]
+    ],
+    "foreign": [
+      {
+        "column": "site_id",
+        "table": "assigned_sites",
+        "target": "id"
+      },
+      {
+        "column": "employee_id",
+        "table": "user",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "submitted_report",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "employee_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "site_id",
+        "type": "integer",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "created_at",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      },
+      {
+        "name": "revision_number",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "default": 1
+      }
+    ],
+    "unique": [],
+    "foreign": [
+      {
+        "column": "site_id",
+        "table": "assigned_sites",
+        "target": "id"
+      },
+      {
+        "column": "employee_id",
+        "table": "user",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "site_report",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "attendance_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "work_performed",
+        "type": "text",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "is_billable",
+        "type": "boolean",
+        "nullable": true,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "activities_completed",
+        "type": "text",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "issues_found",
+        "type": "text",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "recommendations",
+        "type": "text",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "materials_used",
+        "type": "text",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "remarks",
+        "type": "text",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "engineer_name",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 120
+      },
+      {
+        "name": "customer_representative_name",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 120
+      },
+      {
+        "name": "employee_signature",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255
+      },
+      {
+        "name": "customer_signature",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255
+      },
+      {
+        "name": "report_date",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      }
+    ],
+    "unique": [
+      [
+        "attendance_id"
+      ]
+    ],
+    "foreign": [
+      {
+        "column": "attendance_id",
+        "table": "attendance",
+        "target": "id"
+      }
+    ]
+  },
+  {
+    "name": "submitted_report_version",
+    "columns": [
+      {
+        "name": "id",
+        "type": "integer",
+        "nullable": false,
+        "primary": true,
+        "autoincrement": true
+      },
+      {
+        "name": "report_id",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "revision_number",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "start_date",
+        "type": "date",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "end_date",
+        "type": "date",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "total_mandays",
+        "type": "integer",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "filename",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 40
+      },
+      {
+        "name": "original_filename",
+        "type": "string",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "length": 255
+      },
+      {
+        "name": "pdf_replaced",
+        "type": "boolean",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false
+      },
+      {
+        "name": "created_at",
+        "type": "dateTime",
+        "nullable": false,
+        "primary": false,
+        "autoincrement": false,
+        "current": true
+      }
+    ],
+    "unique": [
+      [
+        "report_id",
+        "revision_number"
+      ]
+    ],
+    "foreign": [
+      {
+        "column": "report_id",
+        "table": "submitted_report",
+        "target": "id"
+      }
+    ]
+  }
+]

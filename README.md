@@ -2,6 +2,15 @@
 
 A responsive Flask application for employee site assignments, GPS-recorded attendance, live selfie capture, signed visit reports, PDF generation, Excel exports, and administrator audit/history views.
 
+## Hostinger Single PHP version
+
+The separate [Laravel application](hostinger/README.md) targets Hostinger PHP
+shared hosting with the existing MySQL table names. It does not replace or
+modify the EC2 Flask deployment. Its deployment guide covers the production
+ZIP, private uploads, migrated-password resets, validation and DNS cutover.
+Keep EC2 until the PHP deployment, transferred data and Android workflows have
+passed acceptance testing.
+
 ## Workspace experience
 
 Admin and employee pages share a purple/blue design with grouped desktop sidebar

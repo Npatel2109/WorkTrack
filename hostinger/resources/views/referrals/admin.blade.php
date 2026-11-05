@@ -1,0 +1,4 @@
+@extends('layouts.app')
+@section('content')
+<h1 class="h3">Candidate referrals</h1><div class="table-responsive"><table class="table table-striped"><thead><tr><th>Referrer</th><th>Candidate</th><th>Contact</th><th>Notes</th><th>Status / submitted IST</th><th>Resume</th></tr></thead><tbody>@forelse($referrals as $referral)<tr><td>{{ $referral->employee_name }}</td><td>{{ $referral->candidate_name }}</td><td>{{ $referral->candidate_email }}<br>{{ $referral->candidate_mobile }}</td><td class="text-break">{{ $referral->notes }}</td><td>{{ $referral->status }}<br>{{ \Carbon\CarbonImmutable::parse($referral->created_at,'UTC')->setTimezone('Asia/Kolkata')->format('d M Y H:i') }}</td><td><a href="{{ url('/admin/referrals/'.$referral->id.'/resume') }}">{{ $referral->resume_original_filename }}</a></td></tr>@empty<tr><td colspan="6">No referrals.</td></tr>@endforelse</tbody></table></div>{{ $referrals->links() }}
+@endsection
